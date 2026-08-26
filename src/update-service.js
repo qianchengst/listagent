@@ -57,6 +57,34 @@ function selectAsset(assets = []) {
     })[0] || null;
 }
 
+async function getReleaseFromPublicPage(repository, version) {
+  const response = await fetch(`https://github.com/${repository}/releases/latest`, {
+    redirect: 'manual',
+    headers: { Accept: 'text/html', 'User-Agent': 'listagent-update-checker' }
+  });
+  const location = response.headers.get('location') || '';
+  const tagMatch = location.match(/\/releases\/tag\/([^/?#]+)/i);
+  const latestVersion = tagMatch ? decodeURIComponent(tagMatch[1]).replace(/^v/i, '') : version;
+  const tag = tagMatch ? decodeURIComponent(tagMatch[1]) : `v${latestVersion}`;
+  return {
+    configured: true,
+    repository,
+    currentVersion: version,
+    latestVersion,
+    updateAvailable: compareVersions(latestVersion, version) > 0,
+    releaseName: latestVersion,
+    releaseUrl: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
+    publishedAt: '',
+    notes: '',
+    asset: {
+      name: 'listagent-windows-x64.zip',
+      size: 0,
+      downloadUrl: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/listagent-windows-x64.zip`,
+      digest: ''
+    }
+  };
+}
+
 async function getUpdateInfo(settings = {}) {
   const repository = configuredRepository(settings);
   const version = currentVersion();
@@ -69,7 +97,10 @@ async function getUpdateInfo(settings = {}) {
       'User-Agent': 'listagent-update-checker'
     }
   });
-  if (!response.ok) throw new Error(`GitHub 更新检查失败（HTTP ${response.status}）。`);
+  if (!response.ok) {
+    if (response.status === 403 || response.status === 429) return getReleaseFromPublicPage(repository, version);
+    throw new Error(`GitHub 更新检查失败（HTTP ${response.status}）。`);
+  }
   const release = await response.json();
   const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '') || version;
   const asset = selectAsset(release.assets);
