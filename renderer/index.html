@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>listagent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="pet-app" class="pet-app" hidden>
+      <!-- impeccable-disable broken-image: image sources are injected from validated local GIF assets at runtime. -->
+      <div id="pet-shell" class="pet-shell" aria-label="桌宠：左键拖动，右键单击对话，右键双击打开控制面板">
+        <img id="pet-image" class="pet-media" alt="" hidden />
+        <video id="pet-video" class="pet-media" muted loop autoplay playsinline hidden></video>
+      </div>
+    </main>
+
+    <main id="bubble-app" class="bubble-app" hidden>
+      <section class="bubble-panel" aria-label="桌宠对话气泡">
+        <header class="bubble-header"><strong id="bubble-name">桌宠</strong><button id="bubble-close" class="bubble-close" aria-label="关闭对话"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+        <div id="bubble-messages" class="bubble-messages" aria-live="polite">
+          <div id="bubble-initial-greeting" class="bubble-message assistant">你好，想聊点什么？</div>
+        </div>
+        <form id="bubble-form" class="bubble-composer">
+          <textarea id="bubble-input" rows="1" maxlength="8000" placeholder="输入消息…"></textarea>
+          <button id="bubble-send" class="bubble-send" type="submit">发送<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13M13 6l6 6-6 6"/></svg></button>
+        </form>
+      </section>
+    </main>
+
+    <main id="confirmation-app" class="confirmation-app" hidden>
+      <section class="confirmation-panel" aria-labelledby="confirmation-title">
+        <header class="confirmation-header">
+          <div><p class="confirmation-kicker">权限确认</p><h1 id="confirmation-title">确认这项操作</h1></div>
+          <span class="confirmation-lock" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3M6 10h12v10H6z"/></svg></span>
+        </header>
+        <p id="confirmation-intro" class="confirmation-intro">智能体准备修改你的文件。请确认操作内容后再继续。</p>
+        <div id="confirmation-actions" class="confirmation-actions" aria-live="polite"></div>
+        <p id="confirmation-status" class="confirmation-status" role="status"></p>
+        <button id="confirmation-close" class="outline-button confirmation-close" type="button">关闭</button>
+      </section>
+    </main>
+
+    <main id="console-app" class="console-app" hidden>
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-orb"><span class="brand-glyph">✦</span><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 14.3 9.7 21.2 12l-6.9 2.3L12 21.2l-2.3-6.9L2.8 12l6.9-2.3L12 2.8Z" fill="currentColor"/></svg></span><span>listagent</span></div>
+        <nav class="tabs" aria-label="主导航">
+          <button class="tab active" data-tab="chat"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14v9H12l-4.5 3v-3H5z"/></svg><span>对话</span></button>
+          <button class="tab" data-tab="persona"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 19c.7-3.2 2.9-5 6.5-5s5.8 1.8 6.5 5"/></svg><span>形象与人格</span></button>
+          <button class="tab" data-tab="connection"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8.2 14.5 7.6-7.6a3 3 0 0 1 4.2 4.2l-7.6 7.6a3 3 0 0 1-4.2-4.2Z"/><path d="m9.5 8.2-2.7-2.7a3 3 0 0 0-4.2 4.2l7.6 7.6"/></svg><span>连接</span></button>
+          <button class="tab" data-tab="automation"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg><span>自动化</span></button>
+          <button class="tab" data-tab="personalization"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.5 9l6 .6-4.5 4 1.3 5.9-5.3-3.1-5.3 3.1L8 13.6l-4.5-4 6-.6L12 3.5Z"/></svg><span>个性化</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <span class="status-dot"></span><span>本地优先 · 操作需确认</span>
+          <button id="quit" class="quiet-button">退出应用</button>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <section id="panel-chat" class="panel active">
+          <header class="panel-header">
+            <div><p class="eyebrow">对话</p><h1>和 <span id="chat-name">小列</span> 聊聊</h1></div>
+            <button id="clear-chat" class="outline-button">清空本次对话</button>
+          </header>
+          <div id="messages" class="messages" aria-live="polite">
+            <div class="message assistant"><div class="avatar">✦</div><div id="console-initial-greeting" class="bubble">你好！配置好模型连接后，我就可以陪你对话，并在你确认后完成有限的电脑操作。</div></div>
+          </div>
+          <form id="chat-form" class="composer">
+            <textarea id="chat-input" rows="1" maxlength="8000" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
+            <button id="send" class="send-button" type="submit">发送 <svg class="send-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13M13 6l6 6-6 6"/></svg></button>
+          </form>
+          <p class="hint">新建文件会遵循“自动执行已授权操作”开关；覆盖、追加和编辑文件始终在独立确认弹窗中处理。</p>
+        </section>
+
+        <section id="panel-persona" class="panel">
+          <header class="panel-header"><div><p class="eyebrow">桌宠设定</p><h1>形象与人格</h1></div><button data-save="persona" class="primary-button">保存设定</button></header>
+          <div class="settings-grid persona-grid">
+            <article class="pet-preview-card">
+              <section class="media-setting">
+                <div class="media-setting-heading"><strong>静止时</strong><span>桌宠未移动时显示</span></div>
+                <div class="preview-stage">
+                  <img id="idle-preview-image" alt="静止状态预览" hidden />
+                  <video id="idle-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="idle-preview-empty" class="preview-empty">尚未上传</p>
+                </div>
+                <button id="choose-idle-pet" class="outline-button full">上传静止 GIF / WebM</button>
+              </section>
+              <section class="media-setting">
+                <div class="media-setting-heading"><strong>移动时</strong><span>拖动与随机移动时显示</span></div>
+                <div class="preview-stage">
+                  <img id="moving-preview-image" alt="移动状态预览" hidden />
+                  <video id="moving-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="moving-preview-empty" class="preview-empty">尚未上传：将使用静止动图</p>
+                </div>
+                <button id="choose-moving-pet" class="outline-button full">上传移动 GIF / WebM</button>
+              </section>
+              <section class="media-setting">
+                <div class="media-setting-heading"><strong>删除文件时</strong><span>右键菜单删除文件时播放</span></div>
+                <div class="preview-stage">
+                  <img id="delete-preview-image" alt="删除文件动画预览" hidden />
+                  <video id="delete-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="delete-preview-empty" class="preview-empty">尚未上传：将使用移动动图</p>
+                </div>
+                <button id="choose-delete-pet" class="outline-button full">上传删除 GIF / WebM</button>
+              </section>
+              <p class="field-help">仅支持 GIF 与 WebM，单个文件最大 40MB。未设置移动动图时会沿用静止动图；大小可在下方调整。</p>
+              <section class="pet-scale-settings" aria-labelledby="pet-scale-title">
+                <div class="media-setting-heading"><strong id="pet-scale-title">桌宠大小</strong><span>20%–200%</span></div>
+                <label class="range-label pet-scale-master-label">整体倍率（不改变分项数值）<output id="pet-scale-master-output">100%</output>
+                  <input id="pet-scale-master" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <label class="range-label">静止动画<output id="pet-scale-idle-output">100%</output>
+                  <input id="pet-scale-idle" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <label class="range-label">移动动画<output id="pet-scale-moving-output">100%</output>
+                  <input id="pet-scale-moving" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <label class="range-label">删除动画<output id="pet-scale-delete-output">100%</output>
+                  <input id="pet-scale-delete" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <p class="field-help">整体倍率会同时作用于三种状态，但不会改写下面三个分项拉条的数值。</p>
+              </section>
+            </article>
+            <form id="persona-form" class="form-card">
+              <label>名字<input id="persona-name" maxlength="40" placeholder="例如：小列" /></label>
+              <section class="relationship-field" aria-labelledby="relationship-title">
+                <div id="relationship-title" class="relationship-title">使用者关系</div>
+                <p>定义桌宠如何理解你与它的关系，例如：朋友、搭档、主人、博士、指挥官或同事。</p>
+                <input id="persona-relationship" maxlength="80" placeholder="例如：值得信任的搭档" />
+              </section>
+              <label>人格设定<textarea id="persona-description" rows="6" maxlength="50000" placeholder="描述性格、边界、语气和职责…"></textarea><button id="import-persona-description" type="button" class="outline-button import-text-button">从 TXT 导入并替换</button></label>
+              <label>语言示例<textarea id="persona-examples" rows="7" maxlength="50000" placeholder="用户：…&#10;角色：…"></textarea><button id="import-persona-examples" type="button" class="outline-button import-text-button">从 TXT 导入并替换</button></label>
+              <p id="persona-import-status" class="field-help import-status" aria-live="polite"></p>
+            </form>
+          </div>
+        </section>
+
+        <section id="panel-connection" class="panel">
+          <header class="panel-header"><div><p class="eyebrow">模型服务</p><h1>Token API 连接</h1></div><button data-save="connection" class="primary-button">保存连接</button></header>
+          <form id="connection-form" class="form-card connection-card">
+            <fieldset class="connection-group wide-field">
+              <legend>纯文本模型连接</legend>
+              <label>API Base URL<input id="api-text-base-url" type="url" placeholder="https://text-provider.example/v1" /></label>
+              <label>模型名<input id="api-text-model" type="text" placeholder="例如：deepseek-chat" /></label>
+              <label>API Key<input id="api-text-key" type="password" autocomplete="off" placeholder="留空将保留已保存的文本 API Key" /></label>
+              <div id="text-key-state" class="connection-note">文本 API Key 尚未保存</div>
+            </fieldset>
+            <fieldset class="connection-group wide-field">
+              <legend>视觉模型连接</legend>
+              <label>API Base URL<input id="api-vision-base-url" type="url" placeholder="https://vision-provider.example/v1" /></label>
+              <label>模型名<input id="api-vision-model" type="text" placeholder="例如：gpt-4.1-mini / qwen-vl" /></label>
+              <label>API Key<input id="api-vision-key" type="password" autocomplete="off" placeholder="留空将保留已保存的视觉 API Key" /></label>
+              <div id="vision-key-state" class="connection-note">视觉 API Key 尚未保存</div>
+            </fieldset>
+            <label class="range-label">温度 <output id="temperature-output">0.7</output><input id="temperature" type="range" min="0" max="1.5" step="0.1" value="0.7" /></label>
+            <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="例如：your-name/listagent" /></label>
+          </form>
+          <aside class="info-card"><strong>模型分工</strong><p>普通对话、工具调用和自动化指令使用纯文本连接；只有读取微信截图时才调用视觉连接。两组连接可以分别使用不同平台、Base URL、API Key 和模型。</p></aside>
+          <article class="info-card update-card"><strong>应用更新</strong><p>从 GitHub Releases 检查并下载 Windows 便携版更新。更新时会保留本机人格、API 设置、聊天记录和桌宠素材。</p><div class="update-actions"><button id="check-updates" class="outline-button">检查更新</button><button id="install-update" class="primary-button" hidden>立即更新</button></div><p id="update-status" class="status-text" aria-live="polite"></p></article>
+        </section>
+
+        <section id="panel-automation" class="panel">
+          <header class="panel-header"><div><p class="eyebrow">受控执行</p><h1>自动化与微信</h1></div></header>
+          <article class="automation-switch-card">
+            <div><h2>允许智能体执行电脑操作</h2><p>开启后，启动或恢复应用可直接执行；关闭时所有电脑操作都会被阻止。</p></div>
+            <label class="switch"><input id="automation-enabled" type="checkbox" /><span></span></label>
+          </article>
+          <article class="automation-switch-card">
+            <div><h2>自动执行已授权操作</h2><p>开启后，截图、微信输入和新建文件等操作会直接执行；覆盖、追加和编辑文件仍会弹窗确认。</p></div>
+            <label class="switch"><input id="automation-auto-execute" type="checkbox" /><span></span></label>
+          </article>
+          <article class="info-card"><strong>资源管理器右键删除</strong><p>Windows 文件右键菜单已加入“通过 listagent 删除”。点击后桌宠会移动到当前文件操作位置，播放“删除文件时”动画（未设置时沿用移动动图），然后将文件移入回收站。</p></article>
+          <article class="info-card perch-card"><strong>坐到置顶窗口</strong><p>优先寻找置顶且未最大化的窗口；如果没有，则使用当前前台且未最大化的窗口。桌宠会移动到窗口上方并坐下，之后仍会按当前自动移动规则偶尔离开。</p><button id="perch-pet" class="primary-button">让模型坐到置顶窗口</button><label class="range-label">上下位置 <output id="perch-offset-output">0 px</output><input id="perch-offset" type="range" min="-160" max="160" step="1" value="0" /></label><p id="perch-status" class="status-text" aria-live="polite"></p></article>
+          <div class="automation-grid">
+            <article class="info-card"><strong>可用工具</strong><p>读取当前时间、联网搜索、查询天气和大致位置；打开网页、启动或恢复常用应用，或按名称匹配 Windows 开始菜单中已安装的应用；也可检查微信进程，并在需要时截取微信窗口。模型无法执行任意命令或任意路径。</p></article>
+            <article class="info-card"><strong>微信窗口</strong><p>可自动恢复并置前微信，也可检查当前可用窗口和尺寸。</p><button id="check-wechat" class="outline-button">检查微信状态</button><p id="wechat-status" class="status-text"></p></article>
+          </div>
+          <article class="info-card wechat-monitor-card"><strong>微信监听与自动回复</strong><p>监听先用本地 YOLO 检测纵坐标最低气泡属于对方还是自己，再只对对方气泡调用视觉模型读取文字，最后交给文本模型生成回复。YOLO 未训练或未检测到可信气泡时不会回复。首次启动只建立画面基线，不会立即回复。</p><div class="monitor-controls"><label class="check-row"><input id="wechat-auto-reply" type="checkbox" /><span>检测到新消息后自动回复</span></label><label class="interval-row">检查间隔 <input id="wechat-interval" type="number" min="3" max="30" step="1" /> 秒</label></div><div class="monitor-buttons"><button id="start-wechat-monitor" class="primary-button">开始监听</button><button id="stop-wechat-monitor" class="outline-button">停止监听</button><button id="open-wechat-debug" class="outline-button">打开识图调试</button></div><p id="wechat-monitor-status" class="status-text" aria-live="polite"></p></article>
+          <p class="warning">自动回复必须同时开启“自动执行已授权操作”。YOLO 无法确认气泡、视觉模型无法读取文字或文字已处理过时，不会发送消息。</p>
+        </section>
+
+        <section id="panel-personalization" class="panel">
+          <header class="panel-header"><div><p class="eyebrow">视觉偏好</p><h1>个性化</h1></div></header>
+          <form id="skin-form" class="form-card skin-card">
+            <fieldset class="skin-picker">
+              <legend>皮肤</legend>
+              <p class="field-help skin-intro">一键切换控制面板和对话气泡的视觉风格。</p>
+              <div class="skin-options">
+                <label class="skin-option">
+                  <input type="radio" name="skin" value="classic" />
+                  <span class="skin-preview skin-preview-classic"><span></span><i></i><b></b></span>
+                  <span class="skin-option-copy"><strong>经典皮肤</strong><small>原本的紫色深色界面</small></span>
+                </label>
+                <label class="skin-option">
+                  <input type="radio" name="skin" value="refined" />
+                  <span class="skin-preview skin-preview-refined"><span></span><i></i><b></b></span>
+                  <span class="skin-option-copy"><strong>精修皮肤</strong><small>更清晰的层级与暖金强调色</small></span>
+                </label>
+                <label class="skin-option">
+                  <input type="radio" name="skin" value="reference" />
+                  <span class="skin-preview skin-preview-reference"><span></span><i></i><b></b></span>
+                  <span class="skin-option-copy"><strong>拉普兰德</strong><small>深紫与暖金的主题风格</small></span>
+                </label>
+              </div>
+            </fieldset>
+            <p id="skin-status" class="field-help skin-status" aria-live="polite">选择后立即生效并自动保存。</p>
+          </form>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
