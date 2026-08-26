@@ -127,15 +127,13 @@ function recordGreeting(greeting, sessionId = 'default') {
 
 function messageText(content) {
   if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part) => {
-      if (typeof part === 'string') return part;
-      if (part && typeof part.text === 'string') return part.text;
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  if (Array.isArray(content)) return content.map(messageText).filter(Boolean).join('\n');
+  if (!content || typeof content !== 'object') return '';
+  if (typeof content.text === 'string') return content.text;
+  if (typeof content.output_text === 'string') return content.output_text;
+  if (typeof content.content === 'string' || Array.isArray(content.content)) return messageText(content.content);
+  if (content.message && typeof content.message === 'object') return messageText(content.message);
+  return '';
 }
 
 function textSessionMessages(session) {
@@ -181,8 +179,18 @@ function cropWechatBubble(imageBase64, detection) {
     const right = Math.min(width, Math.ceil(Number(detection.right ?? (detection.x + detection.width)) + padding));
     const bottom = Math.min(height, Math.ceil(Number(detection.bottom ?? (detection.y + detection.height)) + padding));
     if (!width || !height || right <= x || bottom <= y) return imageBase64;
-    const cropped = image.crop({ x, y, width: right - x, height: bottom - y });
-    const data = cropped.toPNG();
+    const cropWidth = right - x;
+    const cropHeight = bottom - y;
+    const cropped = image.crop({ x, y, width: cropWidth, height: cropHeight });
+    // Small one-line bubbles are often only 50–80 px wide in the captured
+    // window. Enlarge the crop before OCR so vision providers receive enough
+    // glyph detail instead of confidently returning NO_MESSAGE.
+    const enlarged = cropped.resize({
+      width: Math.max(1, cropWidth * 3),
+      height: Math.max(1, cropHeight * 3),
+      quality: 'best'
+    });
+    const data = enlarged.toPNG();
     return data.length ? data.toString('base64') : imageBase64;
   } catch {
     return imageBase64;
@@ -729,7 +737,7 @@ async function runWechatVisionPass(settings, imageBase64, instruction) {
     role: 'user',
     content: [
       { type: 'text', text: instruction },
-      { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } }
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}`, detail: 'high' } }
     ]
   };
   let message;
@@ -770,8 +778,17 @@ async function analyzeWechatImage(settings, imageBase64, yoloDetection) {
   }
   const bubbleImage = cropWechatBubble(image, latest);
   const instruction = 'YOLO 已确认这张图片只包含微信聊天中纵坐标最低的对方气泡。你只负责读取这个气泡里的文字，不要判断发送者，不要参考人格，不要生成回复，不要调用工具。请只返回识别到的完整文字；无法读取时只返回 NO_MESSAGE。';
-  const vision = await runWechatVisionPass(settings, bubbleImage, instruction);
-  const text = (vision.text || messageText(vision.raw)).trim();
+  let vision = await runWechatVisionPass(settings, bubbleImage, instruction);
+  let text = (vision.text || messageText(vision.raw)).trim();
+  // Some providers still fail on a tiny crop even after enlargement. Retry
+  // once with the original screenshot and explicit YOLO coordinates so the
+  // provider can locate the same bubble itself.
+  if (!text && bubbleImage !== image) {
+    const retryInstruction = `请只读取 YOLO 框选的微信对方气泡文字，不要判断发送者，不要生成回复。截图尺寸约 ${Math.round(Number(latest.imageWidth || 0))}×${Math.round(Number(latest.imageHeight || 0))}；气泡框为 x=${Math.round(latest.x)}, y=${Math.round(latest.y)}, right=${Math.round(latest.right)}, bottom=${Math.round(latest.bottom)}。只返回完整文字，无法读取时只返回 NO_MESSAGE。`;
+    const retry = await runWechatVisionPass(settings, image, retryInstruction);
+    text = (retry.text || messageText(retry.raw)).trim();
+    vision = { text, raw: JSON.stringify({ cropped: vision.raw, fullScreenshotRetry: retry.raw }) };
+  }
   const cleanText = /^NO_(?:MESSAGE|NEW_MESSAGE|REPLY)$/i.test(text) ? '' : text;
   return {
     sender: 'other', text: cleanText.slice(0, 4000), position, bubbleColor,
