@@ -2,6 +2,10 @@
   "name": "listagent",
   "version": "0.2.0",
   "description": "可配置人格与 GIF 形象的本地桌宠智能体",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qianchengst/listagent.git"
+  },
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
