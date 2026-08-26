@@ -39,4 +39,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.2.0' || github.ref_name }}
-        run: gh release upload "$env:RELEASE_TAG" "listagent-windows-x64.zip" --clobber
+        shell: pwsh
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
+          }
