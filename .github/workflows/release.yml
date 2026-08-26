@@ -24,6 +24,14 @@ jobs:
         run: npm ci
       - name: Verify
         run: npm run check
+      - name: Fetch optional YOLO model
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path models -Force | Out-Null
+          gh release download v0.2.0 --pattern wechat-bubbles.pt --dir models --clobber
       - name: Package portable app
         shell: pwsh
         run: ./scripts/package-portable.ps1 -OutputPath "$env:GITHUB_WORKSPACE/listagent-windows-x64.zip"
