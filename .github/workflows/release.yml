@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,4 +30,5 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "listagent-windows-x64.zip" --title "listagent ${{ github.ref_name }}" --generate-notes
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.2.0' || github.ref_name }}
+        run: gh release upload "$env:RELEASE_TAG" "listagent-windows-x64.zip" --clobber
