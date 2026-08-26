@@ -1,0 +1,32 @@
+name: Build Windows portable release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify
+        run: npm run check
+      - name: Package portable app
+        shell: pwsh
+        run: ./scripts/package-portable.ps1 -OutputPath "$env:GITHUB_WORKSPACE/listagent-windows-x64.zip"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "listagent-windows-x64.zip" --title "listagent ${{ github.ref_name }}" --generate-notes
