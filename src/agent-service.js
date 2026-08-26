@@ -168,6 +168,48 @@ function normalizeWechatBubbleColor(value) {
   return 'unknown';
 }
 
+function filterWechatSendControls(yoloDetection, imageBase64) {
+  if (!yoloDetection || !Array.isArray(yoloDetection.detections)) return yoloDetection;
+  let imageWidth = 0;
+  let imageHeight = 0;
+  try {
+    if (nativeImage?.createFromBuffer) {
+      const size = nativeImage.createFromBuffer(Buffer.from(String(imageBase64 || ''), 'base64')).getSize();
+      imageWidth = size.width;
+      imageHeight = size.height;
+    }
+  } catch { /* keep the unfiltered result if the image cannot be decoded */ }
+  if (!imageWidth || !imageHeight) return yoloDetection;
+  const isSendControl = (detection) => {
+    const sender = normalizeWechatSender(detection?.sender);
+    const x = Number(detection?.x) || 0;
+    const right = Number(detection?.right ?? (x + (Number(detection?.width) || 0)));
+    const bottom = Number(detection?.bottom ?? ((Number(detection?.y) || 0) + (Number(detection?.height) || 0)));
+    const boxWidth = Math.max(0, right - x);
+    const boxHeight = Math.max(0, bottom - (Number(detection?.y) || 0));
+    const centerX = (x + right) / 2 / imageWidth;
+    // WeChat's send button is a compact control in the lower-right toolbar.
+    // Incoming bubbles are left aligned, so only filter an `other` detection
+    // when all of these UI-control geometry conditions are true.
+    return sender === 'other'
+      && centerX >= 0.68
+      && bottom / imageHeight >= 0.84
+      && boxWidth / imageWidth <= 0.28
+      && boxHeight / imageHeight <= 0.16;
+  };
+  const detections = yoloDetection.detections.filter((detection) => !isSendControl(detection));
+  const latest = detections[0] || null;
+  return {
+    ...yoloDetection,
+    available: Boolean(latest),
+    latest,
+    detections,
+    filteredSendControls: yoloDetection.detections.length - detections.length,
+    imageWidth,
+    imageHeight
+  };
+}
+
 function cropWechatBubble(imageBase64, detection) {
   if (!nativeImage?.createFromBuffer || !detection) return imageBase64;
   try {
@@ -790,14 +832,15 @@ async function runWechatVisionPass(settings, imageBase64, instruction) {
 async function analyzeWechatImage(settings, imageBase64, yoloDetection) {
   const image = typeof imageBase64 === 'string' ? imageBase64.trim() : '';
   if (!image) throw new Error('微信截图为空。');
-  const rawYolo = JSON.stringify(yoloDetection || {});
-  const latest = yoloDetection?.latest;
-  if (!yoloDetection?.available || !latest || !['other', 'self'].includes(latest.sender)) {
+  const filteredYolo = filterWechatSendControls(yoloDetection || {}, image);
+  const rawYolo = JSON.stringify(filteredYolo || {});
+  const latest = filteredYolo?.latest;
+  if (!filteredYolo?.available || !latest || !['other', 'self'].includes(latest.sender)) {
     return {
       sender: 'unknown', text: '', position: 'unknown', bubbleColor: 'unknown', confidence: 0,
       raw: rawYolo,
-      senderReason: yoloDetection?.error
-        ? `本地 YOLO 尚不可用：${yoloDetection.error}`
+      senderReason: filteredYolo?.error
+        ? `本地 YOLO 尚不可用：${filteredYolo.error}`
         : '本地 YOLO 未检测到可信的最新微信气泡，已阻止自动回复。'
     };
   }
@@ -830,7 +873,7 @@ async function analyzeWechatImage(settings, imageBase64, yoloDetection) {
   const cleanText = /^NO_(?:MESSAGE|NEW_MESSAGE|REPLY)$/i.test(text) ? '' : text;
   return {
     sender: 'other', text: cleanText.slice(0, 4000), position, bubbleColor,
-    confidence: Number(latest.confidence) || 0, raw: JSON.stringify({ yolo: yoloDetection, vision: vision.raw }),
+    confidence: Number(latest.confidence) || 0, raw: JSON.stringify({ yolo: filteredYolo, vision: vision.raw }),
     senderReason: '本地 YOLO 将纵坐标最低的气泡标记为 other；视觉模型只读取该气泡文字。'
   };
 }
