@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { TOOL_DEFINITIONS, describeToolCall, executeTool, READ_ONLY_TOOLS, CONFIRMATION_REQUIRED_TOOLS, getLastCreatedDocumentPath } = require('./automation-service');
+const { TOOL_DEFINITIONS, describeToolCall, executeTool, READ_ONLY_TOOLS, CONFIRMATION_REQUIRED_TOOLS, getLastCreatedDocumentPath, resolveDocumentPath } = require('./automation-service');
 const { detectWeChatBubble } = require('./yolo-service');
 const { PROJECT_ROOT, ensureDataDirectories } = require('./settings-service');
 
@@ -385,6 +385,14 @@ function inferDocumentToolCall(text) {
       : isCreation && /(?:记事本|文本文件|文本文档|txt)/iu.test(value)
         ? 'desktop/notepad-notes.txt'
         : '';
+  // When the user says “编辑刚才的记事本/文本文件” without repeating its
+  // path, continue using the last document created by this agent.  Previously
+  // the request fell through to the model as ordinary chat, so the model could
+  // claim to have edited a file even though no write tool was ever executed.
+  if (!filePath && /(?:编辑|修改|替换|改为|改成|替换为)/u.test(value)) {
+    filePath = getLastCreatedDocumentPath()
+      || (/(?:记事本|文本文件|文本文档|txt)/iu.test(value) ? 'desktop/notepad-notes.txt' : '');
+  }
   if (!filePath) return null;
   const isWord = /\.docx$/iu.test(filePath);
   const quotedParts = [...value.matchAll(/[“「『【"]([^”」』】"]+)[”」』】"]/gu)].map((item) => item[1]);
@@ -699,26 +707,24 @@ async function handleCompoundWeatherNoteTask(settings, session, userText, task) 
     trimSession(session);
     return { content, actions: [] };
   }
-  let opened;
-  try {
-    opened = await executeTool(task.openCall.function.name, { app: 'notepad' }, true);
-  } catch (error) {
-    const content = `${weatherReply}\n天气已查到，但记事本没有成功打开：${error.message}`;
-    session.push({ role: 'assistant', content });
-    trimSession(session);
-    return { content, actions: [] };
+  // Do not launch a generic blank Notepad first.  That leaves an “无标题” tab
+  // visible when the subsequent document write requires confirmation or
+  // fails.  The write tool opens the exact file after it has been persisted.
+  // Resolve the desktop alias through the same safety/path logic used by the
+  // tool itself; path.resolve(__dirname, '..', 'desktop/...') incorrectly
+  // checked a project subdirectory instead of the user's real Desktop.
+  let filePath = task.filePath;
+  const requestedNewFile = /(?:新建|创建|生成)/u.test(userText);
+  let absoluteNotePath = resolveDocumentPath(filePath, 'text', { mustExist: false });
+  if (requestedNewFile && fs.existsSync(absoluteNotePath)) {
+    const stamp = new Date().toISOString().replace(/[-:TZ.]/gu, '').slice(0, 14);
+    filePath = `desktop/notepad-notes-${stamp}.txt`;
+    absoluteNotePath = resolveDocumentPath(filePath, 'text', { mustExist: false });
   }
-  if (!opened?.ok) {
-    const content = `${weatherReply}\n天气已查到，但记事本没有成功打开。`;
-    session.push({ role: 'assistant', content });
-    trimSession(session);
-    return { content, actions: [] };
-  }
-  const absoluteNotePath = path.resolve(__dirname, '..', task.filePath);
   const mode = fs.existsSync(absoluteNotePath) ? 'append' : 'create';
   const note = `${new Date().toLocaleString('zh-CN')}：${formatWeatherNoteContent(weatherResult, userText)}\n`;
   const writeCall = localToolCall('write_text_document', {
-    file_path: task.filePath,
+    file_path: filePath,
     content: note,
     mode,
     open_in_notepad: true
@@ -731,7 +737,7 @@ async function handleCompoundWeatherNoteTask(settings, session, userText, task) 
         : written.notepadError
           ? `，但打开记事本失败：${written.notepadError}`
           : '。';
-      const content = `${weatherReply}\n已经把天气记录写入 ${task.filePath}${openResult}`;
+      const content = `${weatherReply}\n已经把天气记录写入 ${filePath}${openResult}`;
       session.push({ role: 'assistant', content });
       trimSession(session);
       return { content, actions: [] };
@@ -743,7 +749,7 @@ async function handleCompoundWeatherNoteTask(settings, session, userText, task) 
     }
   }
   const action = createPendingAction(writeCall, crypto.randomUUID());
-  const content = `${weatherReply}\n记事本已经打开，我准备把这条天气记录写入 ${task.filePath}。写入文件需要你的确认。`;
+  const content = `${weatherReply}\n天气已查到，我准备把这条记录写入 ${filePath}，确认后会用记事本打开准确的文件。`;
   session.push({ role: 'assistant', content: '', tool_calls: [writeCall] });
   trimSession(session);
   return { content, actions: [presentAction(action)] };
