@@ -506,7 +506,9 @@ async function requestCompletion(settings, session, options = {}) {
       signal: AbortSignal.timeout(90000)
     });
   } catch (error) {
-    throw new Error(`无法连接模型服务：${error.message}`);
+    const cause = error?.cause;
+    const detail = [cause?.code, cause?.message].filter(Boolean).join(': ');
+    throw new Error(`无法连接模型服务${detail ? `（${detail}）` : ''}：${error.message}`);
   }
   if (!response.ok) {
     const text = await response.text();
@@ -732,23 +734,55 @@ async function generateGreeting(settings, surface = 'console') {
   return greeting.slice(0, 240);
 }
 
-async function runWechatVisionPass(settings, imageBase64, instruction) {
-  const prompt = {
-    role: 'user',
-    content: [
-      { type: 'text', text: instruction },
-      { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}`, detail: 'high' } }
-    ]
-  };
-  let message;
+function compactVisionImage(imageBase64) {
+  if (!nativeImage?.createFromBuffer || typeof imageBase64 !== 'string') return null;
   try {
-    message = await requestCompletion(settings, [prompt], {
+    const source = nativeImage.createFromBuffer(Buffer.from(imageBase64, 'base64'));
+    const size = source.getSize();
+    if (!size.width || !size.height) return null;
+    const original = source.toPNG();
+    // Keep ordinary bubble crops lossless. Full high-resolution screenshots
+    // can exceed a provider's request limit, so cap them before retrying.
+    if (original.length <= 3 * 1024 * 1024 && Math.max(size.width, size.height) <= 2200) return null;
+    const scale = Math.min(1, 2200 / size.width, 2200 / size.height);
+    const resized = scale < 1
+      ? source.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)), quality: 'best' })
+      : source;
+    const jpeg = resized.toJPEG(88);
+    return jpeg.length ? { base64: jpeg.toString('base64'), mimeType: 'image/jpeg' } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runWechatVisionPass(settings, imageBase64, instruction) {
+  const request = async (payload, mimeType = 'image/png') => {
+    const prompt = {
+      role: 'user',
+      content: [
+        { type: 'text', text: instruction },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${payload}`, detail: 'high' } }
+      ]
+    };
+    return requestCompletion(settings, [prompt], {
       allowTools: false,
       model: settings.api.visionModel,
       requiresVision: true
     });
+  };
+  let message;
+  try {
+    message = await request(imageBase64);
   } catch (error) {
-    throw new Error(`视觉模型识别微信截图失败：${error.message}`);
+    const compact = compactVisionImage(imageBase64);
+    if (!compact || !/无法连接模型服务|fetch failed|请求体|413|超时/i.test(String(error.message || ''))) {
+      throw new Error(`视觉模型识别微信截图失败：${error.message}`);
+    }
+    try {
+      message = await request(compact.base64, compact.mimeType);
+    } catch (retryError) {
+      throw new Error(`视觉模型识别微信截图失败：${retryError.message}（已尝试压缩截图重试）`);
+    }
   }
   return parseWechatObservation(message.content);
 }
