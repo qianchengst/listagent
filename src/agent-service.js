@@ -399,9 +399,16 @@ function inferDocumentToolCall(text) {
   const pathEnd = value.indexOf(filePath) + filePath.length;
   const editRemainder = (pathEnd >= filePath.length ? value.slice(pathEnd) : value).replace(/^\s*(?:中的|里的|内的)\s*/u, '');
   const editMatch = editRemainder.match(/\s*[“「『【"]?([\s\S]+?)[”」』】"]?\s*(?:改为|改成|替换为)\s*[“「『【"]?([\s\S]+?)[”」』】"]?\s*$/u);
-  if (editMatch || /(?:编辑|修改|替换|改为|改成|替换为)/u.test(value)) {
-    const oldText = unquoteDocumentPart(editMatch?.[1] || quotedParts[0]);
-    const newText = unquoteDocumentPart(editMatch?.[2] || quotedParts[1]);
+  // A path-less request often uses natural wording such as “把刚才的记事本
+  // 中的‘旧文’改为‘新文’”。Extract the segment after 中的/里的 instead of
+  // passing the whole sentence as old_text.
+  const contextualEditMatch = !cleanedExtractedPath
+    ? value.match(/(?:中的|里的|内的)\s*[“「『【"]?([^”」』】"改成替换为]+?)[”」』】"]?\s*(?:改为|改成|替换为)\s*[“「『【"]?([\s\S]+?)[”」』】"]?\s*$/u)
+    : null;
+  const resolvedEditMatch = editMatch || contextualEditMatch;
+  if (resolvedEditMatch || /(?:编辑|修改|替换|改为|改成|替换为)/u.test(value)) {
+    const oldText = unquoteDocumentPart(resolvedEditMatch?.[1] || quotedParts[0]);
+    const newText = unquoteDocumentPart(resolvedEditMatch?.[2] || quotedParts[1]);
     if (oldText && newText && oldText !== filePath) {
       return localToolCall(isWord ? 'edit_word_document' : 'edit_text_document', {
         file_path: filePath, old_text: oldText, new_text: newText, replace_all: true
