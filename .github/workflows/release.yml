@@ -30,4 +30,5 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" "listagent-windows-x64.zip" --clobber
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.2.0' || github.ref_name }}
+        run: gh release upload "$env:RELEASE_TAG" "listagent-windows-x64.zip" --clobber
