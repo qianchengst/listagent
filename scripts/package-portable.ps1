@@ -7,6 +7,8 @@ $ErrorActionPreference = 'Stop'
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $stage = Join-Path $env:TEMP ("listagent-package-" + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $stage 'listagent'
+$electronExe = Join-Path $root 'node_modules/electron/dist/electron.exe'
+if (-not (Test-Path -LiteralPath $electronExe)) { throw 'Electron runtime missing: node_modules/electron/dist/electron.exe' }
 $items = @('src', 'renderer', 'scripts', 'node_modules', 'models', 'package.json', 'package-lock.json', 'README.md', 'start-listagent.cmd', 'uninstall-listagent.cmd', 'uninstall-listagent.ps1')
 try {
   New-Item -ItemType Directory -Path $payload -Force | Out-Null

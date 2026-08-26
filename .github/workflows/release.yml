@@ -22,6 +22,12 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Install Electron runtime
+        shell: pwsh
+        run: |
+          Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+          node node_modules/electron/install.js
+          if (-not (Test-Path -LiteralPath node_modules/electron/dist/electron.exe)) { throw 'Electron runtime was not downloaded.' }
       - name: Verify
         run: npm run check
       - name: Fetch optional YOLO model
