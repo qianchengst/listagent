@@ -12,13 +12,14 @@ test('YOLO marks other, vision reads the cropped bubble, then text model answers
   const calls = [];
   global.fetch = async (url, options) => {
     const body = JSON.parse(options.body); calls.push({ url, body });
-    if (url.startsWith('https://vision.example')) return { ok: true, json: async () => ({ choices: [{ message: { content: '你好，今晚有空吗？' } }] }) };
+    if (url.startsWith('https://vision.example')) return { ok: true, json: async () => ({ choices: [{ message: { content: [{ type: 'output_text', text: '你好，今晚有空吗？' }] } }] }) };
     return { ok: true, json: async () => ({ choices: [{ message: { content: '当然有空，怎么啦？' } }] }) };
   };
   try {
     const result = await chatWithWechatImage(settings(), 'aGVsbG8=', { available: true, latest: { sender: 'other', confidence: 0.95, x: 10, y: 20, width: 100, height: 40, right: 110, bottom: 60 } });
     assert.equal(result.reply, '当然有空，怎么啦？'); assert.equal(calls.length, 2);
     assert.equal(calls[0].body.model, 'vision-model'); assert.equal(calls[1].body.model, 'text-model');
+    assert.equal(calls[0].body.messages[1].content[1].image_url.detail, 'high');
     assert.equal(JSON.stringify(calls[1].body).includes('image_url'), false); assert.equal(result.sender, 'other'); assert.equal(result.recognizedText, '你好，今晚有空吗？');
     assert.match(calls[1].body.messages[1].content, /帮使用者回复/);
     assert.match(calls[1].body.messages[1].content, /使用者第一人称/);
