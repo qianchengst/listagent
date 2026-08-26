@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { desktopCapturer, shell } = require('electron');
+const { desktopCapturer, nativeImage, shell } = require('electron');
 
 const execFileAsync = promisify(execFile);
 const CAPTURE_DIR = path.join(__dirname, '..', '.runtime', 'wechat-captures');
@@ -840,10 +840,15 @@ async function focusFirstWeChatWindow() {
 
 async function captureWeChatWithDesktopCapturer(handle, width, height) {
   try {
-    // Request the window's actual pixel dimensions. Do not cap or resize the
-    // source thumbnail: the PNG is later used for annotation and YOLO training.
-    const requestedWidth = Math.max(1, Number(width) || 1280);
-    const requestedHeight = Math.max(1, Number(height) || 900);
+    // Ask Electron for a high-resolution thumbnail instead of using the
+    // window's logical/DIP size. On a scaled display the latter can be much
+    // smaller than the actual pixels, which makes short Chinese messages
+    // unreadable to the vision model. The returned PNG and YOLO coordinates
+    // still come from exactly the same image, so resizing cannot desync them.
+    const logicalWidth = Math.max(1, Number(width) || 1280);
+    const logicalHeight = Math.max(1, Number(height) || 900);
+    const requestedWidth = Math.min(4096, Math.max(1920, Math.round(logicalWidth * 2)));
+    const requestedHeight = Math.min(4096, Math.max(1440, Math.round(logicalHeight * 2)));
     const sources = await desktopCapturer.getSources({
       types: ['window'],
       thumbnailSize: { width: requestedWidth, height: requestedHeight },
@@ -934,11 +939,15 @@ if (-not [IO.File]::Exists($target)) { throw '截图文件未生成。' }
   const result = parsePowerShellJson(stdout, null);
   if (!result?.ok || !fs.existsSync(capturePath)) throw new Error(`微信窗口截图失败：${JSON.stringify(result || {})}`);
   const data = fs.readFileSync(capturePath);
+  let actualSize = { width: 0, height: 0 };
+  try { actualSize = nativeImage.createFromBuffer(data).getSize(); } catch { /* keep the window-reported fallback size */ }
   return {
     ...result,
     path: capturePath,
     hash: crypto.createHash('sha256').update(data).digest('hex'),
     base64: data.toString('base64'),
+    width: actualSize.width || Number(result.width) || 0,
+    height: actualSize.height || Number(result.height) || 0,
     captureMethod: 'powershell-print-window'
   };
 }

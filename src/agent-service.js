@@ -186,8 +186,8 @@ function cropWechatBubble(imageBase64, detection) {
     // window. Enlarge the crop before OCR so vision providers receive enough
     // glyph detail instead of confidently returning NO_MESSAGE.
     const enlarged = cropped.resize({
-      width: Math.max(1, cropWidth * 3),
-      height: Math.max(1, cropHeight * 3),
+      width: Math.max(1, cropWidth * 4),
+      height: Math.max(1, cropHeight * 4),
       quality: 'best'
     });
     const data = enlarged.toPNG();
@@ -784,7 +784,11 @@ async function analyzeWechatImage(settings, imageBase64, yoloDetection) {
   // once with the original screenshot and explicit YOLO coordinates so the
   // provider can locate the same bubble itself.
   if (!text && bubbleImage !== image) {
-    const retryInstruction = `请只读取 YOLO 框选的微信对方气泡文字，不要判断发送者，不要生成回复。截图尺寸约 ${Math.round(Number(latest.imageWidth || 0))}×${Math.round(Number(latest.imageHeight || 0))}；气泡框为 x=${Math.round(latest.x)}, y=${Math.round(latest.y)}, right=${Math.round(latest.right)}, bottom=${Math.round(latest.bottom)}。只返回完整文字，无法读取时只返回 NO_MESSAGE。`;
+    let captureSize = { width: 0, height: 0 };
+    try { captureSize = nativeImage.createFromBuffer(Buffer.from(image, 'base64')).getSize(); } catch { /* use YOLO metadata if available */ }
+    const imageWidth = Math.round(Number(latest.imageWidth) || captureSize.width || 0);
+    const imageHeight = Math.round(Number(latest.imageHeight) || captureSize.height || 0);
+    const retryInstruction = `请只读取 YOLO 框选的微信对方气泡文字，不要判断发送者，不要生成回复。截图实际像素约 ${imageWidth}×${imageHeight}；气泡框为 x=${Math.round(latest.x)}, y=${Math.round(latest.y)}, right=${Math.round(latest.right)}, bottom=${Math.round(latest.bottom)}。只返回完整文字，无法读取时只返回 NO_MESSAGE。`;
     const retry = await runWechatVisionPass(settings, image, retryInstruction);
     text = (retry.text || messageText(retry.raw)).trim();
     vision = { text, raw: JSON.stringify({ cropped: vision.raw, fullScreenshotRetry: retry.raw }) };
