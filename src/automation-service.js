@@ -587,6 +587,10 @@ async function writeTextDocument(rawPath, content, mode = 'replace', openInNotep
   }
   if (Buffer.byteLength(next, 'utf8') > MAX_DOCUMENT_BYTES) throw new Error('写入后文档超过 5 MB。');
   writeUtf8Document(filePath, next);
+  // Verify the bytes on disk before reporting success.  This prevents a
+  // friendly model response from masking a failed/partial Notepad write.
+  const persisted = fs.readFileSync(filePath, 'utf8');
+  if (persisted !== next) throw new Error('文本文档写入校验失败，文件内容未按预期保存。');
   if (!existedBefore) lastCreatedDocumentPath = documentResultPath(filePath);
   let notepadOpened = false;
   let notepadError = '';
@@ -624,6 +628,8 @@ function editTextDocument(rawPath, oldText, newText, replaceAll = true) {
   }
   if (Buffer.byteLength(next, 'utf8') > MAX_DOCUMENT_BYTES) throw new Error('编辑后文档超过 5 MB。');
   writeUtf8Document(filePath, next);
+  const persisted = fs.readFileSync(filePath, 'utf8');
+  if (persisted !== next) throw new Error('文本文档编辑校验失败，文件内容未按预期保存。');
   return { ok: true, filePath: documentResultPath(filePath), replacements: count, message: `已编辑文本文档：${documentResultPath(filePath)}` };
 }
 
