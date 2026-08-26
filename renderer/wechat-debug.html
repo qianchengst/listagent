@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>微信识图调试 · listagent</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="wechat-debug.css" />
+  </head>
+  <body>
+    <main class="wechat-debug-app">
+      <header class="debug-header">
+        <div>
+          <p class="eyebrow">微信自动化</p>
+          <h1>微信识图调试</h1>
+        </div>
+        <div class="debug-header-actions"><button id="debug-capture" class="outline-button">直接截图（不发送）</button><button id="debug-save-image" class="outline-button">保存当前截图用于标记</button><div id="debug-time" class="debug-time">尚未收到截图</div></div>
+      </header>
+      <section class="debug-grid">
+        <article class="debug-card screenshot-card">
+          <div class="debug-card-title"><strong>最近一次截图</strong><span id="debug-state" class="debug-badge">等待中</span></div>
+          <div class="screenshot-stage">
+            <img id="debug-screenshot" alt="最近一次微信窗口截图" hidden />
+            <p id="debug-empty">启动微信监听后，这里会显示最近一张截图。</p>
+          </div>
+        </article>
+        <article class="debug-card recognition-card">
+          <div class="debug-card-title"><strong>本地检测 / 视觉模型识别结果</strong><span id="debug-sender" class="sender-badge sender-unknown">unknown</span></div>
+          <dl class="debug-details">
+            <div><dt>处理状态</dt><dd id="debug-message">尚未收到微信截图。</dd></div>
+            <div><dt>截图方式</dt><dd id="debug-capture-method">（未知）</dd></div>
+            <div><dt>截图尺寸</dt><dd id="debug-capture-size">（未知）</dd></div>
+            <div><dt>发送者</dt><dd id="debug-sender-text">unknown</dd></div>
+            <div><dt>判断依据</dt><dd id="debug-sender-reason">（未知）</dd></div>
+            <div><dt>识别文字</dt><dd id="debug-recognized-text" class="recognized-text">（空）</dd></div>
+          </dl>
+          <details class="raw-details">
+            <summary>查看本地检测与视觉模型原始返回</summary>
+            <pre id="debug-raw">（空）</pre>
+          </details>
+        </article>
+      </section>
+      <p id="debug-action-status" class="debug-hint">调试窗口只展示最近一次截图和识别结果。自动监听先依赖本地气泡检测判断归属，再由视觉模型读取对方文字；sender=other 且文本非空时才发送回复，self 或 unknown 会跳过。</p>
+    </main>
+    <script src="wechat-debug.js"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "listagent",
+  "version": "0.2.0",
+  "description": "可配置人格与 GIF 形象的本地桌宠智能体",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/agent-service.js && node --check src/automation-service.js && node --check src/topmost-window-service.js && node --check src/update-service.js && node --check renderer/app.js && node --check renderer/wechat-debug.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [
+    "desktop-pet",
+    "agent",
+    "electron",
+    "local-first"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.3.0"
+  }
+}

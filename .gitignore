@@ -1,0 +1,9 @@
+node_modules/
+.runtime/
+data/
+*.log
+dist/
+yolo/
+.venv-yolo/
+runs/
+documents/
