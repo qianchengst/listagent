@@ -181,6 +181,8 @@ test('compound weather-to-notepad requests are split before the model can claim 
   assert.equal(task.openCall.function.name, 'open_application');
   assert.equal(task.weatherCall.function.name, 'get_weather');
   assert.equal(task.filePath, 'desktop/notepad-notes.txt');
+  const natural = inferCompoundWeatherNoteTask('新建一个记事本，帮我查查明天武汉的天气，记在记事本里，完事后打开给我看');
+  assert.ok(natural, '“记在记事本里” must enter the compound document workflow');
 });
 
 test('opening a just-created note gets a concrete desktop file target', () => {

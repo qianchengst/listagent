@@ -432,7 +432,11 @@ function inferDocumentToolCall(text) {
 
 function inferCompoundWeatherNoteTask(text) {
   const value = String(text || '').trim();
-  if (!value || !/(?:记事本|文本文档|文本文件)/u.test(value) || !/(?:记录|记下|写入|保存|写到)/u.test(value)) return null;
+  // “记在记事本里/记到文件中” is common wording for the same compound
+  // task.  Without these variants the request was treated as weather-only;
+  // the text model then claimed that it had written the note although no
+  // document tool was called.
+  if (!value || !/(?:记事本|文本文档|文本文件)/u.test(value) || !/(?:记录|记下|记在|记到|写入|保存|写到)/u.test(value)) return null;
   const weatherCall = inferRealityToolCall(value);
   if (!weatherCall || weatherCall.function?.name !== 'get_weather') return null;
   return {
