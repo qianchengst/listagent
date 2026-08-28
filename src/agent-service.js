@@ -793,6 +793,20 @@ async function generateGreeting(settings, surface = 'console') {
   return greeting.slice(0, 240);
 }
 
+async function generateWellbeingMessage(settings, scene = {}) {
+  const context = String(scene.context || scene.title || '提醒使用者照顾好自己').trim().slice(0, 800);
+  const prompt = {
+    role: 'user',
+    content: `这是桌宠主动关心使用者的时刻。当前场景：${context}
+
+请严格依据完整人格设定、使用者与你的关系以及语言示例，写一句自然、有人情味的中文关怀话语。可以提醒休息、喝水、活动眼睛和身体、按时吃饭或早点休息，但不要制造焦虑，也不要声称你知道精确的屏幕使用数据。不要提及“后台监测”“定时器”“模型”或这条提示的生成过程。只输出一条适合直接显示在对话气泡里的话，不要 Markdown、引号或前缀，长度不超过 120 字。`
+  };
+  const message = await requestCompletion(settings, [prompt], { allowTools: false });
+  const content = messageText(message.content).trim().replace(/^['"“”]+|['"“”]+$/g, '');
+  if (!content) throw new Error('模型未返回关怀话语。');
+  return content.slice(0, 240);
+}
+
 function compactVisionImage(imageBase64) {
   if (!nativeImage?.createFromBuffer || typeof imageBase64 !== 'string') return null;
   try {
@@ -1138,4 +1152,4 @@ function clearSession(sessionId = 'default') {
   persistSessions();
 }
 
-module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, getSessionHistory, recordGreeting, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
+module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };

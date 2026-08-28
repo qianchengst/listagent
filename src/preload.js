@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('listagent', {
   quit: () => ipcRenderer.invoke('app:quit'),
   onConfigChanged: (handler) => ipcRenderer.on('config:changed', (_event, config) => handler(config)),
   onChatHistoryChanged: (handler) => ipcRenderer.on('agent:history-changed', (_event, history) => handler(history)),
+  onUpdateProgress: (handler) => ipcRenderer.on('update:progress', (_event, progress) => handler(progress)),
+  onWellbeingMessage: (handler) => ipcRenderer.on('agent:wellbeing', (_event, message) => handler(message)),
   onPetMovementState: (handler) => ipcRenderer.on('pet:movement-state', (_event, state) => handler(state)),
   onDeleteAnimation: (handler) => ipcRenderer.on('pet:delete-animation', (_event, asset) => handler(asset)),
   deleteAnimationFinished: () => ipcRenderer.send('pet:delete-animation-finished'),

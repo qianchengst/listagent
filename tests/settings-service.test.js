@@ -49,9 +49,10 @@ test('persona relationship is preserved and has a useful default', () => {
   assert.equal(customSettings.persona.relationship, '我的博士');
 });
 
-test('ui skin is restricted to the two supported choices', () => {
+test('ui skin is restricted to the supported choices', () => {
   assert.equal(toPublicSettings({ ui: { skin: 'refined' } }).ui.skin, 'refined');
   assert.equal(toPublicSettings({ ui: { skin: 'reference' } }).ui.skin, 'reference');
+  assert.equal(toPublicSettings({ ui: { skin: 'pepe' } }).ui.skin, 'pepe');
   assert.equal(toPublicSettings({ ui: { skin: 'unknown' } }).ui.skin, 'classic');
 });
 
@@ -75,6 +76,16 @@ test('pet scales expose independent 20%–200% values and a shared master scale'
 test('perch offset is bounded to a safe vertical range', () => {
   assert.equal(toPublicSettings({ automation: { perchOffsetPx: -500 } }).automation.perchOffsetPx, -160);
   assert.equal(toPublicSettings({ automation: { perchOffsetPx: 500 } }).automation.perchOffsetPx, 160);
+});
+
+test('wellbeing reminders expose conservative defaults and safe bounds', () => {
+  const defaults = toPublicSettings({}).automation;
+  assert.equal(defaults.wellbeingEnabled, true);
+  assert.equal(defaults.wellbeingMinIntervalMs, 45 * 60 * 1000);
+  assert.equal(defaults.wellbeingLongUseThresholdMs, 90 * 60 * 1000);
+  const bounded = toPublicSettings({ automation: { wellbeingMinIntervalMs: 1, wellbeingLongUseThresholdMs: 999999999 } }).automation;
+  assert.equal(bounded.wellbeingMinIntervalMs, 10 * 60 * 1000);
+  assert.equal(bounded.wellbeingLongUseThresholdMs, 240 * 60 * 1000);
 });
 
 test('topmost window candidates require usable bounds', () => {

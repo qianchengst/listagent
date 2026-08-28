@@ -30,6 +30,12 @@ jobs:
           if (-not (Test-Path -LiteralPath node_modules/electron/dist/electron.exe)) { throw 'Electron runtime was not downloaded.' }
       - name: Verify
         run: npm run check
+      - name: Resolve release tag
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REF_NAME -match '^v\d+\.\d+\.\d+$') { $tag = $env:GITHUB_REF_NAME } else { $tag = "v$($package.version)" }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Fetch optional YOLO model
         if: ${{ !hashFiles('models/wechat-bubbles.pt') }}
         continue-on-error: true
@@ -42,15 +48,19 @@ jobs:
       - name: Package portable app
         shell: pwsh
         run: ./scripts/package-portable.ps1 -OutputPath "$env:GITHUB_WORKSPACE/listagent-windows-x64.zip"
+      - name: Generate incremental update manifest
+        env:
+          REPOSITORY: ${{ github.repository }}
+        shell: pwsh
+        run: ./scripts/create-update-manifest.ps1 -OutputPath "$env:GITHUB_WORKSPACE/listagent-update-manifest.json" -Repository $env:REPOSITORY -Tag $env:RELEASE_TAG
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.2.0' || github.ref_name }}
         shell: pwsh
         run: |
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --clobber
+            gh release upload $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
           } else {
-            gh release create $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
+            gh release create $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
           }

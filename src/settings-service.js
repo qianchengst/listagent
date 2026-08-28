@@ -55,7 +55,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     perchOffsetPx: 0,
     wechatMonitorEnabled: false,
     wechatAutoReply: false,
-    wechatIntervalMs: 5000
+    wechatIntervalMs: 5000,
+    // Proactive, persona-aware wellness prompts.  They are intentionally
+    // conservative so a fresh install is helpful without becoming noisy.
+    wellbeingEnabled: true,
+    wellbeingMinIntervalMs: 45 * 60 * 1000,
+    wellbeingLongUseThresholdMs: 90 * 60 * 1000
   }
 });
 
@@ -84,7 +89,10 @@ function mergeSettings(saved = {}) {
   result.pet.deleteScale = normalizePetScale(savedPet.deleteScale, 1);
   result.pet.scale = result.pet.masterScale;
   result.automation.perchOffsetPx = Math.min(160, Math.max(-160, Math.round(Number(result.automation.perchOffsetPx) || 0)));
-  if (!['classic', 'refined', 'reference'].includes(result.ui.skin)) result.ui.skin = 'classic';
+  result.automation.wellbeingEnabled = result.automation.wellbeingEnabled !== false;
+  result.automation.wellbeingMinIntervalMs = Math.min(180 * 60 * 1000, Math.max(10 * 60 * 1000, Math.round(Number(result.automation.wellbeingMinIntervalMs) || 45 * 60 * 1000)));
+  result.automation.wellbeingLongUseThresholdMs = Math.min(240 * 60 * 1000, Math.max(30 * 60 * 1000, Math.round(Number(result.automation.wellbeingLongUseThresholdMs) || 90 * 60 * 1000)));
+  if (!['classic', 'refined', 'reference', 'pepe'].includes(result.ui.skin)) result.ui.skin = 'classic';
   // Existing projects used the enabled switch as the user's permission for
   // computer actions. Preserve that consent when migrating to auto execution.
   if (!saved.automation || typeof saved.automation.autoExecute !== 'boolean') {
@@ -206,7 +214,7 @@ function saveSettings(patch) {
   }
 
   if (input.ui && typeof input.ui === 'object') {
-    if (['classic', 'refined', 'reference'].includes(input.ui.skin)) next.ui.skin = input.ui.skin;
+    if (['classic', 'refined', 'reference', 'pepe'].includes(input.ui.skin)) next.ui.skin = input.ui.skin;
   }
 
   if (input.update && typeof input.update === 'object') {
@@ -223,6 +231,13 @@ function saveSettings(patch) {
     if (Object.prototype.hasOwnProperty.call(input.automation, 'wechatAutoReply')) next.automation.wechatAutoReply = input.automation.wechatAutoReply === true;
     if (Number.isFinite(Number(input.automation.wechatIntervalMs))) {
       next.automation.wechatIntervalMs = Math.min(30000, Math.max(3000, Math.round(Number(input.automation.wechatIntervalMs))));
+    }
+    if (Object.prototype.hasOwnProperty.call(input.automation, 'wellbeingEnabled')) next.automation.wellbeingEnabled = input.automation.wellbeingEnabled === true;
+    if (Number.isFinite(Number(input.automation.wellbeingMinIntervalMs))) {
+      next.automation.wellbeingMinIntervalMs = Math.min(180 * 60 * 1000, Math.max(10 * 60 * 1000, Math.round(Number(input.automation.wellbeingMinIntervalMs))));
+    }
+    if (Number.isFinite(Number(input.automation.wellbeingLongUseThresholdMs))) {
+      next.automation.wellbeingLongUseThresholdMs = Math.min(240 * 60 * 1000, Math.max(30 * 60 * 1000, Math.round(Number(input.automation.wellbeingLongUseThresholdMs))));
     }
   }
 

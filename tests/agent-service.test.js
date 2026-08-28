@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chatWithWechatImage, generateGreeting, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
+const { chatWithWechatImage, generateGreeting, generateWellbeingMessage, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
 const { TOOL_DEFINITIONS } = require('../src/automation-service');
 
 function settings() {
@@ -77,6 +77,26 @@ test('missing text connection returns a persona-aware startup greeting', async (
     assert.match(greeting, /小列/);
     assert.match(greeting, /搭档/);
     assert.match(greeting, /连接/);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('wellbeing reminder uses the complete persona without tools or chat history', async () => {
+  const originalFetch = global.fetch;
+  let request;
+  global.fetch = async (_url, options) => {
+    request = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: '博士，坐久了就起来走两步，顺便喝口水吧。' } }] }) };
+  };
+  try {
+    const config = settings();
+    config.persona.description = 'FULL_WELLBEING_PERSONA';
+    config.persona.examples = 'FULL_WELLBEING_EXAMPLE';
+    const message = await generateWellbeingMessage(config, { context: '连续使用电脑很久，适合休息' });
+    assert.match(message, /喝口水/);
+    assert.match(request.messages[0].content, /FULL_WELLBEING_PERSONA/);
+    assert.match(request.messages[0].content, /FULL_WELLBEING_EXAMPLE/);
+    assert.match(request.messages[1].content, /连续使用电脑很久/);
+    assert.equal(request.tools, undefined);
   } finally { global.fetch = originalFetch; }
 });
 

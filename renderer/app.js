@@ -351,10 +351,17 @@
       scroll();
     };
     api.onChatHistoryChanged(replaceHistory);
+    api.onWellbeingMessage((payload) => {
+      const text = typeof payload === 'string' ? payload : payload?.text;
+      if (!text) return;
+      initialGreeting.hidden = true;
+      const item = addMessage('assistant', String(text).trim());
+      item.classList.add('wellbeing-message');
+    });
     try {
       const config = await api.getConfig();
       name.textContent = config.persona.name || '桌宠';
-      document.documentElement.dataset.skin = ['classic', 'refined', 'reference'].includes(config.ui?.skin) ? config.ui.skin : 'classic';
+      document.documentElement.dataset.skin = ['classic', 'refined', 'reference', 'pepe'].includes(config.ui?.skin) ? config.ui.skin : 'classic';
     } catch { /* The chat can still open while settings are unavailable. */ }
     let history = [];
     try { history = await api.getChatHistory(); } catch { /* use an empty transcript if persistence is unavailable. */ }
@@ -380,7 +387,7 @@
     }
     api.onConfigChanged((next) => {
       name.textContent = next.persona?.name || '桌宠';
-      document.documentElement.dataset.skin = ['classic', 'refined', 'reference'].includes(next.ui?.skin) ? next.ui.skin : 'classic';
+      document.documentElement.dataset.skin = ['classic', 'refined', 'reference', 'pepe'].includes(next.ui?.skin) ? next.ui.skin : 'classic';
     });
     async function submit() {
       const text = input.value.trim();
@@ -425,7 +432,7 @@
     api.onActionConfirmation((nextActions) => render(nextActions));
 
     const applyConfirmationConfig = (config) => {
-      document.documentElement.dataset.skin = ['classic', 'refined', 'reference'].includes(config?.ui?.skin) ? config.ui.skin : 'classic';
+      document.documentElement.dataset.skin = ['classic', 'refined', 'reference', 'pepe'].includes(config?.ui?.skin) ? config.ui.skin : 'classic';
     };
     try { applyConfirmationConfig(await api.getConfig()); } catch { /* use classic skin fallback */ }
     api.onConfigChanged(applyConfirmationConfig);
@@ -502,6 +509,7 @@
     root.hidden = false;
     const el = (selector) => document.querySelector(selector);
     const messages = el('#messages');
+    const updateProgress = el('#update-progress');
     const initialGreeting = el('#console-initial-greeting');
     const initialGreetingRow = initialGreeting.closest('.message');
     let config;
@@ -512,9 +520,25 @@
     let historyReady = false;
     let pendingHistory;
 
+    function formatMegabytes(bytes) {
+      const value = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
+      return value >= 100 ? value.toFixed(0) : value.toFixed(1);
+    }
+
+    function renderUpdateProgress(progress = {}) {
+      if (!updateProgress) return;
+      const downloaded = Math.max(0, Number(progress.downloaded) || 0);
+      const total = Math.max(0, Number(progress.total) || 0);
+      updateProgress.hidden = false;
+      updateProgress.dataset.state = progress.phase || 'download';
+      updateProgress.textContent = `${formatMegabytes(downloaded)} MB / ${total > 0 ? `${formatMegabytes(total)} MB` : '… MB'}`;
+    }
+
+    api.onUpdateProgress(renderUpdateProgress);
+
     function applyConfig(next) {
       config = next;
-      const skin = ['classic', 'refined', 'reference'].includes(config.ui?.skin) ? config.ui.skin : 'classic';
+      const skin = ['classic', 'refined', 'reference', 'pepe'].includes(config.ui?.skin) ? config.ui.skin : 'classic';
       document.documentElement.dataset.skin = skin;
       el('#chat-name').textContent = config.persona.name;
       el('#persona-name').value = config.persona.name;
@@ -532,6 +556,15 @@
       el('#vision-key-state').textContent = config.api.visionApiKeySet ? '视觉 API Key 已保存（为安全起见不回显）' : '视觉 API Key 尚未保存';
       el('#automation-enabled').checked = config.automation.enabled;
       el('#automation-auto-execute').checked = config.automation.autoExecute === true;
+      el('#wellbeing-enabled').checked = config.automation.wellbeingEnabled !== false;
+      const wellbeingInterval = Math.round((Number(config.automation.wellbeingMinIntervalMs) || 45 * 60 * 1000) / 60000);
+      const wellbeingThreshold = Math.round((Number(config.automation.wellbeingLongUseThresholdMs) || 90 * 60 * 1000) / 60000);
+      el('#wellbeing-interval').value = wellbeingInterval;
+      el('#wellbeing-interval-output').value = `${wellbeingInterval} 分钟`;
+      el('#wellbeing-interval-output').textContent = el('#wellbeing-interval-output').value;
+      el('#wellbeing-threshold').value = wellbeingThreshold;
+      el('#wellbeing-threshold-output').value = `${wellbeingThreshold} 分钟`;
+      el('#wellbeing-threshold-output').textContent = el('#wellbeing-threshold-output').value;
       el('#wechat-auto-reply').checked = config.automation.wechatAutoReply === true;
       el('#wechat-interval').value = Math.round((Number(config.automation.wechatIntervalMs) || 5000) / 1000);
       const perchOffset = Math.round(Number(config.automation.perchOffsetPx) || 0);
@@ -733,6 +766,11 @@
       const status = el('#update-status');
       const install = el('#install-update');
       install.hidden = true;
+      if (updateProgress) {
+        updateProgress.hidden = true;
+        updateProgress.textContent = '';
+        updateProgress.dataset.state = '';
+      }
       status.textContent = '正在检查 GitHub 更新…';
       try {
         const result = await api.checkForUpdates();
@@ -741,7 +779,8 @@
         } else if (!result.updateAvailable) {
           status.textContent = `当前已是最新版本 v${result.currentVersion}。`;
         } else {
-          status.textContent = `发现新版本 v${result.latestVersion}，点击“立即更新”下载安装。`;
+          const modeHint = result.mode === 'delta' ? '安装时只下载变化的程序文件' : '该 Release 没有增量清单，将下载完整包';
+          status.textContent = `发现新版本 v${result.latestVersion}，${modeHint}。点击“立即更新”。`;
           install.hidden = false;
         }
       } catch (error) {
@@ -752,11 +791,16 @@
       const status = el('#update-status');
       const button = el('#install-update');
       button.disabled = true;
-      status.textContent = '正在下载更新，完成后会自动重启…';
+      status.textContent = '正在获取更新清单并下载变化文件，完成后会自动重启…';
+      renderUpdateProgress({ phase: 'starting', downloaded: 0, total: 0 });
       try {
         await api.installUpdate();
       } catch (error) {
         button.disabled = false;
+        if (updateProgress) {
+          updateProgress.hidden = false;
+          updateProgress.dataset.state = 'error';
+        }
         status.textContent = `更新失败：${error.message}`;
       }
     });
@@ -789,6 +833,27 @@
     el('#automation-auto-execute').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { autoExecute: event.target.checked } }));
     });
+    el('#wellbeing-enabled').addEventListener('change', async (event) => {
+      applyConfig(await api.saveConfig({ automation: { wellbeingEnabled: event.target.checked } }));
+    });
+    el('#wellbeing-interval').addEventListener('input', (event) => {
+      el('#wellbeing-interval-output').value = `${event.target.value} 分钟`;
+      el('#wellbeing-interval-output').textContent = el('#wellbeing-interval-output').value;
+    });
+    el('#wellbeing-interval').addEventListener('change', async (event) => {
+      const minutes = Math.min(180, Math.max(10, Number(event.target.value) || 45));
+      event.target.value = minutes;
+      applyConfig(await api.saveConfig({ automation: { wellbeingMinIntervalMs: minutes * 60000 } }));
+    });
+    el('#wellbeing-threshold').addEventListener('input', (event) => {
+      el('#wellbeing-threshold-output').value = `${event.target.value} 分钟`;
+      el('#wellbeing-threshold-output').textContent = el('#wellbeing-threshold-output').value;
+    });
+    el('#wellbeing-threshold').addEventListener('change', async (event) => {
+      const minutes = Math.min(240, Math.max(30, Number(event.target.value) || 90));
+      event.target.value = minutes;
+      applyConfig(await api.saveConfig({ automation: { wellbeingLongUseThresholdMs: minutes * 60000 } }));
+    });
     el('#wechat-auto-reply').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { wechatAutoReply: event.target.checked } }));
     });
@@ -816,11 +881,11 @@
     });
     document.querySelectorAll('input[name="skin"]').forEach((input) => {
       input.addEventListener('change', async (event) => {
-        const skin = ['classic', 'refined', 'reference'].includes(event.target.value) ? event.target.value : 'classic';
+        const skin = ['classic', 'refined', 'reference', 'pepe'].includes(event.target.value) ? event.target.value : 'classic';
         el('#skin-status').textContent = '正在应用皮肤…';
         try {
           applyConfig(await api.saveConfig({ ui: { skin } }));
-          el('#skin-status').textContent = skin === 'refined' ? '精修皮肤已启用并保存。' : skin === 'reference' ? '拉普兰德皮肤已启用并保存。' : '经典皮肤已启用并保存。';
+          el('#skin-status').textContent = skin === 'refined' ? '精修皮肤已启用并保存。' : skin === 'reference' ? '拉普兰德皮肤已启用并保存。' : skin === 'pepe' ? '佩佩皮肤已启用并保存。' : '经典皮肤已启用并保存。';
         } catch (error) {
           el('#skin-status').textContent = `皮肤切换失败：${error.message}`;
         }

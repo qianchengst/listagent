@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, powerMonitor, screen, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const {
@@ -11,7 +11,7 @@ const {
   saveSettings,
   toPublicSettings
 } = require('./settings-service');
-const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, getSessionHistory, recordGreeting } = require('./agent-service');
+const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting } = require('./agent-service');
 const { getWeChatStatus, captureWeChatWindow, sendTextToActiveWeChat } = require('./automation-service');
 const { detectWeChatBubble, stopWorker } = require('./yolo-service');
 const { findTopmostUnmaximizedWindows } = require('./topmost-window-service');
@@ -72,6 +72,15 @@ let wechatMonitorIntervalMs = 0;
 let wechatMonitorBusy = false;
 let wechatLastCaptureHash = '';
 let wechatLastRepliedMessageKey = '';
+let wellbeingTimer;
+let wellbeingBusy = false;
+let wellbeingUsageStartedAt = Date.now();
+let wellbeingLastTriggerAt = 0;
+const WELLBEING_POLL_MS = 60000;
+const WELLBEING_IDLE_RESET_SECONDS = 15 * 60;
+const WELLBEING_START_GRACE_MS = 5 * 60 * 1000;
+const WELLBEING_ACTIVE_MEAL_THRESHOLD_MS = 30 * 60 * 1000;
+const WELLBEING_ACTIVE_EYE_THRESHOLD_MS = 45 * 60 * 1000;
 const greetingCache = new Map();
 const greetingInFlight = new Map();
 let lastWechatDebug = {
@@ -385,28 +394,145 @@ function warmGreetingCache() {
   }
 }
 
+function hasTextModelConnection(settings) {
+  const api = settings?.api || {};
+  return Boolean(String(api.textBaseUrl || api.baseUrl || '').trim()
+    && String(api.textApiKey || api.apiKey || '').trim()
+    && String(api.textModel || api.model || '').trim());
+}
+
+function getWellbeingScene(settings) {
+  if (settings?.automation?.wellbeingEnabled === false || !hasTextModelConnection(settings)) return null;
+  let idleSeconds = 0;
+  try {
+    idleSeconds = Number(powerMonitor?.getSystemIdleTime?.()) || 0;
+  } catch {
+    idleSeconds = 0;
+  }
+  // A long period with no keyboard/mouse input is a natural break.  Reset the
+  // continuous-use clock so the next active session starts fresh.
+  if (idleSeconds >= WELLBEING_IDLE_RESET_SECONDS) {
+    wellbeingUsageStartedAt = 0;
+    return null;
+  }
+  if (!wellbeingUsageStartedAt) wellbeingUsageStartedAt = Date.now();
+  const nowMs = Date.now();
+  if (nowMs - wellbeingUsageStartedAt < WELLBEING_START_GRACE_MS && wellbeingLastTriggerAt === 0) return null;
+  const minInterval = Math.max(10 * 60 * 1000, Number(settings.automation.wellbeingMinIntervalMs) || 45 * 60 * 1000);
+  if (wellbeingLastTriggerAt && nowMs - wellbeingLastTriggerAt < minInterval) return null;
+  const activeMs = nowMs - wellbeingUsageStartedAt;
+  const now = new Date(nowMs);
+  const hour = now.getHours();
+  const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  if (hour >= 23 || hour < 7) {
+    return { key: 'late-night', title: '夜间休息', context: `现在是 ${time}，时间已经比较晚了。使用者仍在电脑前，请温柔提醒早点休息，明早再继续也不迟。` };
+  }
+  const longUseThreshold = Math.max(30 * 60 * 1000, Number(settings.automation.wellbeingLongUseThresholdMs) || 90 * 60 * 1000);
+  if (activeMs >= longUseThreshold) {
+    const minutes = Math.max(1, Math.round(activeMs / 60000));
+    return { key: 'long-use', title: '连续使用时间较长', context: `使用者已经连续使用电脑约 ${minutes} 分钟，适合提醒站起来活动一下、看看远处、喝点水，让眼睛和身体休息一会儿。` };
+  }
+  if ((hour === 12 || hour === 13) && activeMs >= WELLBEING_ACTIVE_MEAL_THRESHOLD_MS) {
+    return { key: 'meal', title: '午间补充能量', context: `现在是 ${time} 左右，接近午餐时间。使用者已经使用电脑一段时间，请自然提醒吃饭和补充水分。` };
+  }
+  if (hour >= 15 && hour < 18 && activeMs >= WELLBEING_ACTIVE_EYE_THRESHOLD_MS) {
+    return { key: 'eye-break', title: '眼睛休息', context: `现在是 ${time}，使用者已经盯着屏幕一段时间，请提醒做一次短暂的远眺或眨眼放松。` };
+  }
+  if (hour >= 20 && hour < 23 && activeMs >= WELLBEING_ACTIVE_EYE_THRESHOLD_MS) {
+    return { key: 'evening', title: '晚间放松', context: `现在是 ${time}，已经进入晚间。使用者仍在电脑前，请提醒适度收尾、活动身体并留意休息。` };
+  }
+  return null;
+}
+
+function sendWellbeingMessage(payload) {
+  if (!bubbleWindow || bubbleWindow.isDestroyed()) return;
+  const send = () => {
+    if (!bubbleWindow || bubbleWindow.isDestroyed()) return;
+    bubbleWindow.webContents.send('agent:wellbeing', payload);
+  };
+  if (bubbleWindow.webContents.isLoading()) bubbleWindow.webContents.once('did-finish-load', send);
+  else send();
+}
+
+async function pollWellbeingReminder() {
+  if (wellbeingBusy || taskDepth > 0 || (confirmationWindow && confirmationWindow.isVisible()) || (consoleWindow && consoleWindow.isVisible())) return;
+  const settings = readSettings();
+  const scene = getWellbeingScene(settings);
+  if (!scene) return;
+  wellbeingBusy = true;
+  try {
+    const text = await generateWellbeingMessage(settings, scene);
+    wellbeingLastTriggerAt = Date.now();
+    stopAutoMove();
+    const hadBubbleWindow = Boolean(bubbleWindow && !bubbleWindow.isDestroyed());
+    const bubbleWasVisible = hadBubbleWindow && bubbleWindow.isVisible();
+    if (!bubbleWindow || bubbleWindow.isDestroyed()) createBubbleWindow();
+    positionBubbleWindow();
+    if (typeof bubbleWindow.showInactive === 'function') bubbleWindow.showInactive();
+    else bubbleWindow.show();
+    // Do not refresh a currently open conversation: replacing its history
+    // while the user is typing would remove transient UI state. A newly
+    // created/hidden bubble still receives the normal history before the tip.
+    if (!bubbleWasVisible) sendChatHistory(bubbleWindow);
+    sendWellbeingMessage({ text, scene: scene.key, timestamp: new Date().toISOString() });
+  } catch (error) {
+    // A transient provider/network failure should never interrupt the desktop
+    // pet or produce a false “reminder sent” message. Suppress immediate
+    // retries as well, so an unavailable provider cannot be polled every minute.
+    wellbeingLastTriggerAt = Date.now();
+    console.warn(`生成人文关怀提醒失败：${error.message}`);
+  } finally {
+    wellbeingBusy = false;
+  }
+}
+
+function stopWellbeingMonitor() {
+  if (wellbeingTimer) clearInterval(wellbeingTimer);
+  wellbeingTimer = undefined;
+  wellbeingBusy = false;
+  wellbeingUsageStartedAt = Date.now();
+}
+
+function syncWellbeingMonitor(config) {
+  if (config?.automation?.wellbeingEnabled === false) {
+    if (wellbeingTimer) stopWellbeingMonitor();
+    return;
+  }
+  if (wellbeingTimer) return;
+  wellbeingTimer = setInterval(() => { void pollWellbeingReminder(); }, WELLBEING_POLL_MS);
+}
+
 async function checkForUpdates() {
   return getUpdateInfo(readSettings());
+}
+
+function emitUpdateProgress(progress = {}) {
+  if (consoleWindow && !consoleWindow.isDestroyed()) {
+    consoleWindow.webContents.send('update:progress', progress);
+  }
 }
 
 async function installAvailableUpdate() {
   const update = await getUpdateInfo(readSettings());
   if (!update.updateAvailable) throw new Error('当前已经是最新版本。');
-  const archivePath = await downloadUpdate(update);
+  emitUpdateProgress({ phase: 'starting', downloaded: 0, total: 0, files: 0, completedFiles: 0 });
+  const updatePayload = await downloadUpdate(update, emitUpdateProgress);
   const updater = path.join(PROJECT_ROOT, 'scripts', 'apply-update.ps1');
   if (!fs.existsSync(updater)) throw new Error('更新程序文件缺失。');
   const executablePath = path.join(PROJECT_ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
-  const child = spawn('powershell.exe', [
+  const updaterArgs = [
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updater,
     '-InstallRoot', PROJECT_ROOT,
-    '-ArchivePath', archivePath,
     '-ParentPid', String(process.pid),
     '-ExecutablePath', executablePath
-  ], { detached: true, windowsHide: true, stdio: 'ignore' });
+  ];
+  if (updatePayload.kind === 'delta') updaterArgs.push('-PayloadPath', updatePayload.payloadPath);
+  else updaterArgs.push('-ArchivePath', updatePayload.archivePath);
+  const child = spawn('powershell.exe', updaterArgs, { detached: true, windowsHide: true, stdio: 'ignore' });
   child.unref();
   app.isQuiting = true;
   setTimeout(() => app.quit(), 120);
-  return { started: true, version: update.latestVersion };
+  return { started: true, version: update.latestVersion, mode: updatePayload.kind, files: updatePayload.files, bytes: updatePayload.bytes };
 }
 
 function rendererPath(file) {
@@ -696,6 +822,7 @@ function createBubbleWindow() {
   bubbleWindow = new BrowserWindow({
     width: 380,
     height: 330,
+    show: false,
     minWidth: 320,
     minHeight: 260,
     maxWidth: 520,
@@ -937,6 +1064,7 @@ function broadcastConfig() {
   }
   warmGreetingCache();
   syncWechatMonitor(config);
+  syncWellbeingMonitor(config);
   scheduleRandomMove();
   return config;
 }
@@ -1233,6 +1361,7 @@ app.whenReady().then(() => {
   createPetWindow();
   createConsoleWindow();
   syncWechatMonitor(toPublicSettings(readSettings()));
+  syncWellbeingMonitor(toPublicSettings(readSettings()));
   const deleteTarget = deleteTargetFromArgv();
   if (deleteTarget) setTimeout(() => { void handleFileDeleteRequest(deleteTarget); }, 450);
   app.on('activate', openConsole);
@@ -1252,5 +1381,6 @@ app.on('before-quit', () => {
   clearSession();
   stopAutoMove();
   stopWechatMonitor();
+  stopWellbeingMonitor();
   stopWorker();
 });
