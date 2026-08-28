@@ -8,6 +8,9 @@ const UPDATE_DIR = path.join(PROJECT_ROOT, '.runtime', 'updates');
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 const MANIFEST_NAME = 'listagent-update-manifest.json';
+// Clients before v0.2.9 predate the delta-update protocol and must always use
+// the portable archive, even when a newer Release also contains a manifest.
+const MIN_DELTA_CLIENT_VERSION = '0.2.9';
 const ALLOWED_ROOTS = new Set(['src', 'renderer', 'scripts', 'models']);
 const ALLOWED_FILES = new Set([
   'package.json', 'package-lock.json', 'README.md', 'start-listagent.cmd',
@@ -153,7 +156,7 @@ async function getReleaseFromPublicPage(repository, version) {
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: latestVersion,
     releaseUrl: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
-    publishedAt: '', notes: '', mode: 'delta',
+    publishedAt: '', notes: '', mode: compareVersions(version, MIN_DELTA_CLIENT_VERSION) >= 0 ? 'delta' : 'full',
     manifestAsset: { name: MANIFEST_NAME, size: 0, downloadUrl: releaseAssetUrl(repository, tag, MANIFEST_NAME), digest: '' },
     asset: { name: 'listagent-windows-x64.zip', size: 0, downloadUrl: releaseAssetUrl(repository, tag, 'listagent-windows-x64.zip'), digest: '' }
   };
@@ -172,13 +175,14 @@ async function getUpdateInfo(settings = {}) {
   const release = await response.json();
   const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '') || version;
   const manifestAsset = selectManifestAsset(release.assets); const asset = selectAsset(release.assets);
+  const mode = manifestAsset && compareVersions(version, MIN_DELTA_CLIENT_VERSION) >= 0 ? 'delta' : 'full';
   return {
     configured: true, repository, currentVersion: version, latestVersion,
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: release.name || release.tag_name || latestVersion,
     releaseUrl: release.html_url || `https://github.com/${repository}/releases`,
     publishedAt: release.published_at || '', notes: String(release.body || '').slice(0, 4000),
-    mode: manifestAsset ? 'delta' : 'full', manifestAsset: normalizeAsset(manifestAsset), asset: normalizeAsset(asset)
+    mode, manifestAsset: normalizeAsset(manifestAsset), asset: normalizeAsset(asset)
   };
 }
 
@@ -267,13 +271,14 @@ async function downloadFullArchive(updateInfo, onProgress) {
 }
 
 async function downloadUpdate(updateInfo, onProgress) {
-  const manifest = await downloadManifest(updateInfo, onProgress);
+  const supportsDelta = compareVersions(currentVersion(), MIN_DELTA_CLIENT_VERSION) >= 0;
+  const manifest = supportsDelta ? await downloadManifest(updateInfo, onProgress) : null;
   if (manifest?.repository && normalizeRepository(manifest.repository) !== normalizeRepository(updateInfo?.repository)) throw new Error('更新清单与当前仓库不匹配。');
   if (manifest?.version && compareVersions(manifest.version, updateInfo?.latestVersion) !== 0) throw new Error('更新清单与 Release 版本不匹配。');
   const currentElectron = String(packageInfo().devDependencies?.electron || '').trim();
   const targetElectron = String(manifest?.runtime?.electron || '').trim();
-  if (manifest && !(currentElectron && targetElectron && currentElectron !== targetElectron)) return downloadDeltaUpdate(updateInfo, manifest, onProgress);
+  if (supportsDelta && manifest && !(currentElectron && targetElectron && currentElectron !== targetElectron)) return downloadDeltaUpdate(updateInfo, manifest, onProgress);
   return downloadFullArchive(updateInfo, onProgress);
 }
 
-module.exports = { configuredRepository, compareVersions, currentVersion, safeRelativePath, createDeltaPlan, getUpdateInfo, downloadUpdate };
+module.exports = { configuredRepository, compareVersions, currentVersion, safeRelativePath, createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION };

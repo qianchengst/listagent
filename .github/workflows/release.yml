@@ -35,7 +35,10 @@ jobs:
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
           if ($env:GITHUB_REF_NAME -match '^v\d+\.\d+\.\d+$') { $tag = $env:GITHUB_REF_NAME } else { $tag = "v$($package.version)" }
+          $tagVersion = [version]($tag.TrimStart('v'))
+          $deltaEnabled = $tagVersion -gt [version]'0.2.9'
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PUBLISH_DELTA_MANIFEST=$($deltaEnabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Fetch optional YOLO model
         if: ${{ !hashFiles('models/wechat-bubbles.pt') }}
         continue-on-error: true
@@ -49,6 +52,7 @@ jobs:
         shell: pwsh
         run: ./scripts/package-portable.ps1 -OutputPath "$env:GITHUB_WORKSPACE/listagent-windows-x64.zip"
       - name: Generate incremental update manifest
+        if: ${{ env.PUBLISH_DELTA_MANIFEST == 'true' }}
         env:
           REPOSITORY: ${{ github.repository }}
         shell: pwsh
@@ -60,7 +64,15 @@ jobs:
         run: |
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
+            if ($env:PUBLISH_DELTA_MANIFEST -eq 'true') {
+              gh release upload $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --clobber
+            } else {
+              gh release upload $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --clobber
+            }
           } else {
-            gh release create $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
+            if ($env:PUBLISH_DELTA_MANIFEST -eq 'true') {
+              gh release create $env:RELEASE_TAG listagent-windows-x64.zip listagent-update-manifest.json --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
+            } else {
+              gh release create $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
+            }
           }

@@ -4,7 +4,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { safeRelativePath, createDeltaPlan } = require('../src/update-service');
+const { safeRelativePath, createDeltaPlan, compareVersions, MIN_DELTA_CLIENT_VERSION } = require('../src/update-service');
+
+test('delta updates start with v0.2.9 clients', () => {
+  assert.equal(MIN_DELTA_CLIENT_VERSION, '0.2.9');
+  assert.equal(compareVersions('0.2.8', MIN_DELTA_CLIENT_VERSION), -1);
+  assert.equal(compareVersions('0.2.9', MIN_DELTA_CLIENT_VERSION), 0);
+  assert.equal(compareVersions('0.2.10', MIN_DELTA_CLIENT_VERSION), 1);
+});
 
 test('incremental update paths stay inside the packaged application surface', () => {
   assert.equal(safeRelativePath('src/main.js'), 'src/main.js');

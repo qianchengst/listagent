@@ -42,4 +42,4 @@ npm test
 
 ## GitHub 更新
 
-在控制面板“连接”页面填写公开仓库的 `owner/repository`，即可检查 GitHub Releases 并一键更新。点击更新后，按钮右侧会显示累计下载量（已下载 MB / 总计 MB）；新版 Release 会同时发布 `listagent-update-manifest.json`，更新程序先比较本机文件 SHA-256，只下载缺少或已变化的程序文件，不再默认下载整个便携包；只有旧 Release 没有增量清单或 Electron 运行时发生变化时才回退完整包。更新会保留每位使用者的 `data`、`.runtime`、模型和本地素材。发布新版本时推送形如 `v0.2.1` 的标签，GitHub Actions 会自动构建便携包和增量清单。
+在控制面板“连接”页面填写公开仓库的 `owner/repository`，即可检查 GitHub Releases 并一键更新。点击更新后，按钮右侧会显示累计下载量（已下载 MB / 总计 MB）。`v0.2.9` 是兼容过渡版本，仅发布完整便携包；从 `v0.2.10` 起每个 Release 同时发布完整包和 `listagent-update-manifest.json` 增量清单。`0.2.9` 之前的客户端始终识别并下载完整包，`0.2.9` 及之后的客户端优先使用增量清单，缺少清单或 Electron 运行时变化时才回退完整包。更新会保留每位使用者的 `data`、`.runtime`、模型和本地素材。发布新版本时推送形如 `v0.2.1` 的标签，GitHub Actions 会按版本策略自动构建并发布相应资产。
