@@ -56,9 +56,18 @@ test('ui skin is restricted to the two supported choices', () => {
 });
 
 test('pet scales expose independent 20%–200% values and a shared master scale', () => {
-  const pet = toPublicSettings({ pet: { masterScale: 1.5, idleScale: 0.2, movingScale: 2.4, deleteScale: 0.75 } }).pet;
+  const pet = toPublicSettings({ pet: {
+    masterScale: 1.5,
+    idleScale: 0.2,
+    standingScale: 1.25,
+    interactionScale: 0.05,
+    movingScale: 2.4,
+    deleteScale: 0.75
+  } }).pet;
   assert.equal(pet.masterScale, 1.5);
   assert.equal(pet.idleScale, 0.2);
+  assert.equal(pet.standingScale, 1.25);
+  assert.equal(pet.interactionScale, 0.2);
   assert.equal(pet.movingScale, 2);
   assert.equal(pet.deleteScale, 0.75);
 });
