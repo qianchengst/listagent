@@ -45,6 +45,7 @@
     let dragging = false;
     let dragReady = false;
     let dragMoved = false;
+    let clickStartedWhileStatic = false;
     let rightClickTimer;
     let lastRightClickAt = 0;
     let pointerOffset = { x: 0, y: 0 };
@@ -52,7 +53,12 @@
     let deleteAnimationPlaying = false;
     let deleteAnimationTimer;
     let deleteAnimationFallbackTimer;
+    let interactionPlaying = false;
+    let interactionTimer;
+    let interactionFallbackTimer;
+    let pendingMovementState;
     let activeMediaState = 'idle';
+    let staticPose = 'idle';
     let lastPetScale;
 
     function stateScale(state) {
@@ -72,11 +78,72 @@
     }
 
     function drawPet() {
-      if (deleteAnimationPlaying) return;
+      if (deleteAnimationPlaying || interactionPlaying) return;
       const movingAsset = config?.pet.moving;
-      const asset = moving && movingAsset?.url ? movingAsset : config?.pet.idle;
-      applyPetScale(moving && movingAsset?.url ? 'moving' : 'idle');
+      const idleAsset = config?.pet.idle;
+      const standingAsset = config?.pet.standing;
+      const useMoving = moving && movingAsset?.url;
+      // If no dedicated moving asset is configured, keep showing whichever
+      // static pose is available instead of making the pet disappear.
+      const useStanding = standingAsset?.url && (staticPose === 'standing' || !idleAsset?.url);
+      const asset = useMoving
+        ? movingAsset
+        : useStanding ? standingAsset : idleAsset;
+      applyPetScale(useMoving ? 'moving' : useStanding ? 'standing' : 'idle');
       renderMedia(image, video, null, asset);
+    }
+
+    function finishInteraction() {
+      if (!interactionPlaying) return;
+      interactionPlaying = false;
+      if (interactionTimer) clearTimeout(interactionTimer);
+      if (interactionFallbackTimer) clearTimeout(interactionFallbackTimer);
+      interactionTimer = undefined;
+      interactionFallbackTimer = undefined;
+      image.onload = null;
+      video.onended = null;
+      video.loop = true;
+      const pending = pendingMovementState;
+      pendingMovementState = undefined;
+      if (pending) {
+        moving = pending.isMoving === true;
+        if (!moving) {
+          staticPose = pending.perched === true
+            ? 'idle'
+            : (config?.pet?.standing?.url && Math.random() < 0.5 ? 'standing' : 'idle');
+        }
+      }
+      drawPet();
+    }
+
+    function playInteraction() {
+      const asset = config?.pet.interaction;
+      if (!asset?.url || interactionPlaying || deleteAnimationPlaying) return false;
+      interactionPlaying = true;
+      pendingMovementState = undefined;
+      applyPetScale('interaction');
+      image.hidden = true;
+      video.hidden = true;
+      video.pause();
+      if (asset.type === 'webm') {
+        video.loop = false;
+        video.onended = finishInteraction;
+        video.src = asset.url;
+        video.hidden = false;
+        video.currentTime = 0;
+        video.play().catch(finishInteraction);
+        interactionTimer = setTimeout(finishInteraction, 12000);
+      } else {
+        image.src = '';
+        image.onload = () => {
+          image.onload = null;
+          interactionTimer = setTimeout(finishInteraction, Math.max(150, Number(asset.durationMs) || 3200));
+        };
+        image.src = asset.url;
+        image.hidden = false;
+        interactionFallbackTimer = setTimeout(finishInteraction, 15000);
+      }
+      return true;
     }
 
     function finishDeleteAnimation() {
@@ -129,9 +196,19 @@
     config = await api.getConfig();
     apply(config);
     api.onConfigChanged(apply);
-    api.onPetMovementState((isMoving) => {
+    api.onPetMovementState((state) => {
+      const payload = typeof state === 'boolean' ? { isMoving: state, perched: false } : (state || {});
+      if (interactionPlaying) {
+        pendingMovementState = payload;
+        return;
+      }
       if (!dragging && !deleteAnimationPlaying) {
-        moving = isMoving;
+        moving = payload.isMoving === true;
+        if (!moving) {
+          staticPose = payload.perched === true
+            ? 'idle'
+            : (config?.pet?.standing?.url && Math.random() < 0.5 ? 'standing' : 'idle');
+        }
         drawPet();
       }
     });
@@ -145,11 +222,12 @@
         event.preventDefault();
         return;
       }
-      if (event.button !== 0 || dragging) return;
+      if (event.button !== 0 || dragging || interactionPlaying || deleteAnimationPlaying) return;
       event.preventDefault();
       dragging = true;
       dragReady = false;
       dragMoved = false;
+      clickStartedWhileStatic = !moving;
       pointerStart = { x: event.screenX, y: event.screenY };
       moving = true;
       shell.classList.add('dragging');
@@ -173,7 +251,7 @@
       moving = false;
       shell.classList.remove('dragging');
       drawPet();
-      api.endPetDrag();
+      api.endPetDrag(dragMoved);
     };
     shell.addEventListener('pointerup', (event) => {
       if (event.button === 2) {
@@ -194,8 +272,11 @@
         }
         return;
       }
+      const wasClick = !dragMoved;
       stopDragging();
-      // A left click without movement deliberately does nothing.
+      // A left click without movement plays the optional one-shot interaction
+      // animation.  Actual dragging remains unchanged.
+      if (wasClick && clickStartedWhileStatic) playInteraction();
     });
     shell.addEventListener('pointercancel', stopDragging);
     shell.addEventListener('contextmenu', (event) => {
@@ -464,11 +545,15 @@
         input.closest('.skin-option')?.classList.toggle('selected', input.checked);
       });
       renderMedia(el('#idle-preview-image'), el('#idle-preview-video'), el('#idle-preview-empty'), config.pet.idle);
+      renderMedia(el('#standing-preview-image'), el('#standing-preview-video'), el('#standing-preview-empty'), config.pet.standing);
+      renderMedia(el('#interaction-preview-image'), el('#interaction-preview-video'), el('#interaction-preview-empty'), config.pet.interaction);
       renderMedia(el('#moving-preview-image'), el('#moving-preview-video'), el('#moving-preview-empty'), config.pet.moving);
       renderMedia(el('#delete-preview-image'), el('#delete-preview-video'), el('#delete-preview-empty'), config.pet.deleteAnimation);
       const scaleValues = {
         master: Number(config.pet.masterScale ?? config.pet.scale ?? 1),
         idle: Number(config.pet.idleScale ?? 1),
+        standing: Number(config.pet.standingScale ?? 1),
+        interaction: Number(config.pet.interactionScale ?? 1),
         moving: Number(config.pet.movingScale ?? 1),
         delete: Number(config.pet.deleteScale ?? 1)
       };
@@ -676,9 +761,11 @@
       }
     });
     el('#choose-idle-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('idle')));
+    el('#choose-standing-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('standing')));
+    el('#choose-interaction-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('interaction')));
     el('#choose-moving-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('moving')));
     el('#choose-delete-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('delete')));
-    for (const key of ['master', 'idle', 'moving', 'delete']) {
+    for (const key of ['master', 'idle', 'standing', 'interaction', 'moving', 'delete']) {
       const input = el(`#pet-scale-${key}`);
       const output = el(`#pet-scale-${key}-output`);
       input?.addEventListener('input', (event) => {
