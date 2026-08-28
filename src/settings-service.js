@@ -28,13 +28,17 @@ const DEFAULT_SETTINGS = Object.freeze({
   },
   pet: {
     idleAssetPath: '',
+    standingAssetPath: '',
+    interactionAssetPath: '',
     movingAssetPath: '',
     deleteAnimationAssetPath: '',
-    // masterScale is a multiplier shared by all three display states.  The
+    // masterScale is a multiplier shared by all display states.  The
     // individual values remain independent so the master slider never
     // overwrites a user's per-state tuning.
     masterScale: 1,
     idleScale: 1,
+    standingScale: 1,
+    interactionScale: 1,
     movingScale: 1,
     deleteScale: 1,
     scale: 1
@@ -74,6 +78,8 @@ function mergeSettings(saved = {}) {
     : savedPet.scale;
   result.pet.masterScale = normalizePetScale(legacyScale, 1);
   result.pet.idleScale = normalizePetScale(savedPet.idleScale, 1);
+  result.pet.standingScale = normalizePetScale(savedPet.standingScale, 1);
+  result.pet.interactionScale = normalizePetScale(savedPet.interactionScale, 1);
   result.pet.movingScale = normalizePetScale(savedPet.movingScale, 1);
   result.pet.deleteScale = normalizePetScale(savedPet.deleteScale, 1);
   result.pet.scale = result.pet.masterScale;
@@ -191,7 +197,7 @@ function saveSettings(patch) {
       next.pet.masterScale = normalizePetScale(input.pet.scale, next.pet.masterScale);
       next.pet.scale = next.pet.masterScale;
     }
-    for (const state of ['idle', 'moving', 'delete']) {
+    for (const state of ['idle', 'standing', 'interaction', 'moving', 'delete']) {
       const key = `${state}Scale`;
       if (Object.prototype.hasOwnProperty.call(input.pet, key)) {
         next.pet[key] = normalizePetScale(input.pet[key], next.pet[key]);
@@ -233,18 +239,23 @@ function importPetAsset(sourcePath, state = 'idle') {
   ensureDataDirectories();
   const targetKey = state === 'moving'
     ? 'movingAssetPath'
-    : state === 'delete'
-      ? 'deleteAnimationAssetPath'
-      : state === 'idle'
-        ? 'idleAssetPath'
-        : '';
+    : state === 'standing'
+      ? 'standingAssetPath'
+      : state === 'interaction'
+        ? 'interactionAssetPath'
+        : state === 'delete'
+          ? 'deleteAnimationAssetPath'
+          : state === 'idle'
+            ? 'idleAssetPath'
+            : '';
   if (!targetKey) throw new Error('桌宠素材状态无效。');
   const validExtensions = new Set(['.gif', '.webm']);
   const source = path.resolve(sourcePath);
   const extension = path.extname(source).toLowerCase();
   if (!validExtensions.has(extension)) throw new Error('只支持 GIF 或 WEBM 动图。');
   const stat = fs.statSync(source);
-  if (!stat.isFile() || stat.size > 40 * 1024 * 1024) throw new Error('动图必须是小于 40MB 的文件。');
+  const maxBytes = state === 'interaction' ? 100 * 1024 * 1024 : 40 * 1024 * 1024;
+  if (!stat.isFile() || stat.size > maxBytes) throw new Error(`动图大小不得超过 ${state === 'interaction' ? 100 : 40}MB。`);
 
   const destination = path.join(PETS_DIR, `${Date.now()}-${crypto.randomUUID()}${extension}`);
   fs.copyFileSync(source, destination);
@@ -338,9 +349,13 @@ function toPublicSettings(settings = readSettings()) {
       scale: copy.pet.masterScale,
       masterScale: copy.pet.masterScale,
       idleScale: copy.pet.idleScale,
+      standingScale: copy.pet.standingScale,
+      interactionScale: copy.pet.interactionScale,
       movingScale: copy.pet.movingScale,
       deleteScale: copy.pet.deleteScale,
       idle: toPublicPetAsset(copy.pet.idleAssetPath),
+      standing: toPublicPetAsset(copy.pet.standingAssetPath),
+      interaction: toPublicPetAsset(copy.pet.interactionAssetPath),
       moving: toPublicPetAsset(copy.pet.movingAssetPath),
       deleteAnimation: toPublicPetAsset(copy.pet.deleteAnimationAssetPath)
     }

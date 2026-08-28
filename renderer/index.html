@@ -78,22 +78,40 @@
           <div class="settings-grid persona-grid">
             <article class="pet-preview-card">
               <section class="media-setting">
-                <div class="media-setting-heading"><strong>静止时</strong><span>桌宠未移动时显示</span></div>
+                <div class="media-setting-heading"><strong>坐立</strong><span>原“静止模型”，窗口上方吸附时固定显示</span></div>
                 <div class="preview-stage">
-                  <img id="idle-preview-image" alt="静止状态预览" hidden />
+                  <img id="idle-preview-image" alt="坐立状态预览" hidden />
                   <video id="idle-preview-video" muted loop autoplay playsinline hidden></video>
                   <p id="idle-preview-empty" class="preview-empty">尚未上传</p>
                 </div>
-                <button id="choose-idle-pet" class="outline-button full">上传静止 GIF / WebM</button>
+                <button id="choose-idle-pet" class="outline-button full">上传坐立 GIF / WebM</button>
+              </section>
+              <section class="media-setting">
+                <div class="media-setting-heading"><strong>站立</strong><span>移动结束后随机显示</span></div>
+                <div class="preview-stage">
+                  <img id="standing-preview-image" alt="站立状态预览" hidden />
+                  <video id="standing-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="standing-preview-empty" class="preview-empty">尚未上传：将使用坐立动图</p>
+                </div>
+                <button id="choose-standing-pet" class="outline-button full">上传站立 GIF / WebM</button>
               </section>
               <section class="media-setting">
                 <div class="media-setting-heading"><strong>移动时</strong><span>拖动与随机移动时显示</span></div>
                 <div class="preview-stage">
                   <img id="moving-preview-image" alt="移动状态预览" hidden />
                   <video id="moving-preview-video" muted loop autoplay playsinline hidden></video>
-                  <p id="moving-preview-empty" class="preview-empty">尚未上传：将使用静止动图</p>
+                  <p id="moving-preview-empty" class="preview-empty">尚未上传：将使用坐立动图</p>
                 </div>
                 <button id="choose-moving-pet" class="outline-button full">上传移动 GIF / WebM</button>
+              </section>
+              <section class="media-setting">
+                <div class="media-setting-heading"><strong>互动</strong><span>左键单击静止动作时播放一次</span></div>
+                <div class="preview-stage">
+                  <img id="interaction-preview-image" alt="互动状态预览" hidden />
+                  <video id="interaction-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="interaction-preview-empty" class="preview-empty">尚未上传：单击时不播放互动动画</p>
+                </div>
+                <button id="choose-interaction-pet" class="outline-button full">上传互动 GIF / WebM</button>
               </section>
               <section class="media-setting">
                 <div class="media-setting-heading"><strong>删除文件时</strong><span>右键菜单删除文件时播放</span></div>
@@ -104,14 +122,20 @@
                 </div>
                 <button id="choose-delete-pet" class="outline-button full">上传删除 GIF / WebM</button>
               </section>
-              <p class="field-help">仅支持 GIF 与 WebM，单个文件最大 40MB。未设置移动动图时会沿用静止动图；大小可在下方调整。</p>
+              <p class="field-help">仅支持 GIF 与 WebM；坐立、站立、移动和删除动图最大 40MB，互动动图最大 100MB。未设置站立或移动动图时会使用坐立动图。</p>
               <section class="pet-scale-settings" aria-labelledby="pet-scale-title">
                 <div class="media-setting-heading"><strong id="pet-scale-title">桌宠大小</strong><span>20%–200%</span></div>
                 <label class="range-label pet-scale-master-label">整体倍率（不改变分项数值）<output id="pet-scale-master-output">100%</output>
                   <input id="pet-scale-master" type="range" min="20" max="200" step="1" value="100" />
                 </label>
-                <label class="range-label">静止动画<output id="pet-scale-idle-output">100%</output>
+                <label class="range-label">坐立动画<output id="pet-scale-idle-output">100%</output>
                   <input id="pet-scale-idle" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <label class="range-label">站立动画<output id="pet-scale-standing-output">100%</output>
+                  <input id="pet-scale-standing" type="range" min="20" max="200" step="1" value="100" />
+                </label>
+                <label class="range-label">互动动画<output id="pet-scale-interaction-output">100%</output>
+                  <input id="pet-scale-interaction" type="range" min="20" max="200" step="1" value="100" />
                 </label>
                 <label class="range-label">移动动画<output id="pet-scale-moving-output">100%</output>
                   <input id="pet-scale-moving" type="range" min="20" max="200" step="1" value="100" />
@@ -119,7 +143,7 @@
                 <label class="range-label">删除动画<output id="pet-scale-delete-output">100%</output>
                   <input id="pet-scale-delete" type="range" min="20" max="200" step="1" value="100" />
                 </label>
-                <p class="field-help">整体倍率会同时作用于三种状态，但不会改写下面三个分项拉条的数值。</p>
+                <p class="field-help">整体倍率会同时作用于五种状态，但不会改写下面各分项拉条的数值。</p>
               </section>
             </article>
             <form id="persona-form" class="form-card">

@@ -63,6 +63,7 @@ let taskDepth = 0;
 let autoMoving = false;
 let randomMoveTimer;
 let moveAnimationTimer;
+let dragOriginPerchedWindowInfo;
 let lockingPetViewport = false;
 let perchedOnWindow = false;
 let perchedWindowInfo;
@@ -137,7 +138,13 @@ async function registerWindowsContextMenu() {
 
 function deleteAnimationAsset() {
   const pet = toPublicSettings(readSettings()).pet;
-  return pet.deleteAnimation?.url ? pet.deleteAnimation : pet.moving?.url ? pet.moving : pet.idle;
+  return pet.deleteAnimation?.url
+    ? pet.deleteAnimation
+    : pet.moving?.url
+      ? pet.moving
+      : pet.idle?.url
+        ? pet.idle
+        : pet.standing;
 }
 
 function petDimensions(scale = petWindowScale) {
@@ -220,10 +227,10 @@ async function deleteTargetPosition() {
 
 async function movePetToDeleteTarget() {
   const destination = await deleteTargetPosition();
-  return movePetLinearly(destination);
+  return movePetLinearly(destination, { perched: false });
 }
 
-function movePetLinearly(destination) {
+function movePetLinearly(destination, metadata = {}) {
   if (!destination || !petWindow || petWindow.isDestroyed()) return Promise.resolve();
   const start = petWindow.getBounds();
   const target = {
@@ -233,7 +240,7 @@ function movePetLinearly(destination) {
   const distance = Math.hypot(target.x - start.x, target.y - start.y);
   emitMovementState(true);
   if (distance < 2) {
-    emitMovementState(false);
+    emitMovementState(false, metadata);
     return Promise.resolve();
   }
   return new Promise((resolve) => {
@@ -242,7 +249,7 @@ function movePetLinearly(destination) {
     const timer = setInterval(() => {
       if (!petWindow || petWindow.isDestroyed()) {
         clearInterval(timer);
-        emitMovementState(false);
+        emitMovementState(false, metadata);
         resolve();
         return;
       }
@@ -253,7 +260,7 @@ function movePetLinearly(destination) {
       );
       if (progress >= 1) {
         clearInterval(timer);
-        emitMovementState(false);
+        emitMovementState(false, metadata);
         resolve();
       }
     }, 16);
@@ -407,12 +414,16 @@ function rendererPath(file) {
 }
 
 function hasIdlePetAsset() {
-  return Boolean(toPublicSettings(readSettings()).pet.idle.url);
+  const pet = toPublicSettings(readSettings()).pet;
+  return Boolean(pet.idle?.url || pet.standing?.url);
 }
 
-function emitMovementState(isMoving) {
+function emitMovementState(isMoving, metadata = {}) {
   if (petWindow && !petWindow.isDestroyed()) {
-    petWindow.webContents.send('pet:movement-state', isMoving);
+    petWindow.webContents.send('pet:movement-state', {
+      isMoving: Boolean(isMoving),
+      perched: metadata.perched === true
+    });
   }
 }
 
@@ -430,12 +441,12 @@ function canAutoMove() {
   );
 }
 
-function stopAutoMove() {
+function stopAutoMove(metadata = {}) {
   if (randomMoveTimer) clearTimeout(randomMoveTimer);
   if (moveAnimationTimer) clearInterval(moveAnimationTimer);
   randomMoveTimer = undefined;
   moveAnimationTimer = undefined;
-  if (autoMoving) emitMovementState(false);
+  if (autoMoving) emitMovementState(false, metadata);
   autoMoving = false;
 }
 
@@ -503,7 +514,7 @@ async function perchPetOnTopmostWindow() {
   perchedWindowInfo = target;
   perchedOnWindow = true;
   const destination = choosePerchDestination(petWindow.getBounds(), target);
-  await movePetLinearly(destination);
+  await movePetLinearly(destination, { perched: true });
   scheduleRandomMove();
   return { ok: true, title: target.title || '置顶窗口' };
 }
@@ -511,7 +522,7 @@ async function perchPetOnTopmostWindow() {
 function repositionPerchedPet() {
   if (!perchedWindowInfo || !petWindow || petWindow.isDestroyed() || userDragging || autoMoving) return;
   const destination = choosePerchDestination(petWindow.getBounds(), perchedWindowInfo, true);
-  void movePetLinearly(destination);
+  void movePetLinearly(destination, { perched: true });
 }
 
 async function snapPetToNearbyWindow() {
@@ -533,7 +544,7 @@ async function snapPetToNearbyWindow() {
   if (!nearest) return false;
   perchedWindowInfo = nearest.windowInfo;
   perchedOnWindow = true;
-  await movePetLinearly(choosePerchDestination(bounds, nearest.windowInfo, true));
+  await movePetLinearly(choosePerchDestination(bounds, nearest.windowInfo, true), { perched: true });
   return true;
 }
 
@@ -557,7 +568,7 @@ async function startRandomMove() {
 
   moveAnimationTimer = setInterval(() => {
     if (!petWindow || petWindow.isDestroyed() || userDragging || taskDepth > 0 || (consoleWindow && consoleWindow.isVisible())) {
-      stopAutoMove();
+      stopAutoMove({ perched: target.perched });
       scheduleRandomMove();
       return;
     }
@@ -569,7 +580,7 @@ async function startRandomMove() {
     if (progress === 1) {
       perchedOnWindow = target.perched;
       perchedWindowInfo = target.windowInfo;
-      stopAutoMove();
+      stopAutoMove({ perched: target.perched });
       scheduleRandomMove();
     }
   }, 32);
@@ -1098,12 +1109,16 @@ function registerIpc() {
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => installAvailableUpdate());
   ipcMain.handle('pet:choose-media', async (_event, state) => {
-    const targetState = ['idle', 'moving', 'delete'].includes(state) ? state : 'idle';
+    const targetState = ['idle', 'standing', 'interaction', 'moving', 'delete'].includes(state) ? state : 'idle';
     const title = targetState === 'moving'
       ? '选择移动时桌宠动图'
-      : targetState === 'delete'
-        ? '选择文件删除时播放的动图'
-        : '选择静止时桌宠动图';
+      : targetState === 'standing'
+        ? '选择站立时桌宠动图'
+        : targetState === 'interaction'
+          ? '选择互动时桌宠动图'
+          : targetState === 'delete'
+            ? '选择文件删除时播放的动图'
+            : '选择坐立时桌宠动图';
     const answer = await dialog.showOpenDialog({
       title,
       properties: ['openFile'],
@@ -1127,6 +1142,7 @@ function registerIpc() {
   });
   ipcMain.handle('pet:drag-start', () => {
     stopAutoMove();
+    dragOriginPerchedWindowInfo = perchedOnWindow ? perchedWindowInfo : undefined;
     perchedOnWindow = false;
     perchedWindowInfo = undefined;
     userDragging = true;
@@ -1136,12 +1152,14 @@ function registerIpc() {
   ipcMain.on('pet:drag-move', (_event, x, y) => {
     if (userDragging) positionPet(x, y);
   });
-  ipcMain.handle('pet:drag-end', async () => {
+  ipcMain.handle('pet:drag-end', async (_event, moved) => {
     userDragging = false;
-    perchedOnWindow = false;
-    perchedWindowInfo = undefined;
-    emitMovementState(false);
-    await snapPetToNearbyWindow();
+    const restorePerch = moved !== true && dragOriginPerchedWindowInfo;
+    dragOriginPerchedWindowInfo = undefined;
+    perchedOnWindow = Boolean(restorePerch);
+    perchedWindowInfo = restorePerch || undefined;
+    emitMovementState(false, { perched: Boolean(restorePerch) });
+    if (moved === true) await snapPetToNearbyWindow();
     scheduleRandomMove();
   });
   ipcMain.handle('pet:perch', () => runTask(() => perchPetOnTopmostWindow()));
