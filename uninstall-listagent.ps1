@@ -31,6 +31,27 @@ if ($registryText -and $registryText -match $registryPattern) {
   Write-Host 'No context-menu entry for this version was found; other versions were not changed.'
 }
 
+# Remove the Windows logon entry only when it points to this installation.
+# This keeps a second listagent copy (for example the C: and E: versions)
+# untouched.
+$runKey = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
+$runRegistryPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run'
+$startupNames = @()
+$runProperties = Get-ItemProperty -LiteralPath $runRegistryPath -ErrorAction SilentlyContinue
+if ($runProperties) {
+  $startupNames = @($runProperties.PSObject.Properties |
+    Where-Object { $_.Name -notmatch '^PS' -and [string]$_.Value -match $registryPattern } |
+    Select-Object -ExpandProperty Name)
+}
+foreach ($startupName in $startupNames) {
+  Remove-ItemProperty -LiteralPath $runRegistryPath -Name $startupName -Force -ErrorAction SilentlyContinue
+}
+if ($startupNames.Count -gt 0) {
+  Write-Host 'Windows startup entry for this version restored.' -ForegroundColor Green
+} else {
+  Write-Host 'No startup entry for this version was found; other versions were not changed.'
+}
+
 $processPattern = [regex]::Escape($installRoot)
 Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -and $_.CommandLine -match $processPattern } |

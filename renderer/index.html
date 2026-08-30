@@ -50,6 +50,7 @@
           <button class="tab" data-tab="connection"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8.2 14.5 7.6-7.6a3 3 0 0 1 4.2 4.2l-7.6 7.6a3 3 0 0 1-4.2-4.2Z"/><path d="m9.5 8.2-2.7-2.7a3 3 0 0 0-4.2 4.2l7.6 7.6"/></svg><span>连接</span></button>
           <button class="tab" data-tab="automation"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg><span>自动化</span></button>
           <button class="tab" data-tab="personalization"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.5 9l6 .6-4.5 4 1.3 5.9-5.3-3.1-5.3 3.1L8 13.6l-4.5-4 6-.6L12 3.5Z"/></svg><span>个性化</span></button>
+          <button class="tab" data-tab="companion"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V5.8A1.8 1.8 0 0 1 5.8 4H20v13.5H5.8A1.8 1.8 0 0 0 4 19.3Z"/><path d="M4 19.5A1.8 1.8 0 0 0 5.8 21H20"/><path d="M8 8h8M8 11.5h5"/></svg><span>陪伴记录</span></button>
         </nav>
         <div class="sidebar-bottom">
           <span class="status-dot"></span><span>本地优先 · 操作需确认</span>
@@ -64,7 +65,7 @@
             <button id="clear-chat" class="outline-button">清空本次对话</button>
           </header>
           <div id="messages" class="messages" aria-live="polite">
-            <div class="message assistant"><div class="avatar">✦</div><div id="console-initial-greeting" class="bubble">你好！配置好模型连接后，我就可以陪你对话，并在你确认后完成有限的电脑操作。</div></div>
+            <div class="message assistant"><div class="avatar"><img class="avatar-image" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="" hidden /><span class="avatar-glyph">✦</span><svg class="avatar-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.4 9l5.9 1-4.4 4.1 1 5.9-4.9-2.8-4.9 2.8 1-5.9-4.4-4.1 5.9-1L12 3.5Z"/></svg></div><div id="console-initial-greeting" class="bubble">你好！配置好模型连接后，我就可以陪你对话，并在你确认后完成有限的电脑操作。</div></div>
           </div>
           <form id="chat-form" class="composer">
             <textarea id="chat-input" rows="1" maxlength="8000" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
@@ -164,6 +165,13 @@
             </article>
             <form id="persona-form" class="form-card">
               <label>名字<input id="persona-name" maxlength="40" placeholder="例如：小列" /></label>
+              <section class="persona-avatar-setting" aria-labelledby="persona-avatar-title">
+                <div class="media-setting-heading"><strong id="persona-avatar-title">聊天头像</strong><span>显示在控制面板对话左侧</span></div>
+                <div class="persona-avatar-row">
+                  <div id="persona-avatar-preview" class="persona-avatar-preview" aria-label="当前聊天头像"><img id="persona-avatar-preview-image" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="当前聊天头像" hidden /><span id="persona-avatar-preview-empty">✦</span></div>
+                  <div class="persona-avatar-copy"><p>可上传 PNG、JPG、WebP 或 GIF，最大 10MB。</p><button id="choose-persona-avatar" type="button" class="outline-button">上传头像</button></div>
+                </div>
+              </section>
               <section class="relationship-field" aria-labelledby="relationship-title">
                 <div id="relationship-title" class="relationship-title">使用者关系</div>
                 <p>定义桌宠如何理解你与它的关系，例如：朋友、搭档、主人、博士、指挥官或同事。</p>
@@ -211,6 +219,10 @@
             <div><h2>自动执行已授权操作</h2><p>开启后，截图、微信输入和新建文件等操作会直接执行；覆盖、追加和编辑文件仍会弹窗确认。</p></div>
             <label class="switch"><input id="automation-auto-execute" type="checkbox" /><span></span></label>
           </article>
+          <article class="automation-switch-card automation-startup-card">
+            <div><h2>开机自启动</h2><p>登录 Windows 后自动启动桌宠，控制面板保持隐藏；可随时关闭。</p></div>
+            <label class="switch"><input id="automation-start-at-login" type="checkbox" /><span></span></label>
+          </article>
           </div>
           <article class="info-card movement-frequency-card">
             <div><strong>自然移动频率</strong><p>桌宠每次移动结束后会静止一段时间，再随机移动。两个控制点决定静止时间范围，采用非线性刻度：10 秒至 10 分钟。</p></div>
@@ -248,6 +260,19 @@
           <article class="info-card wechat-monitor-card"><strong>微信监听与自动回复</strong><p>监听先用本地 YOLO 检测纵坐标最低气泡属于对方还是自己，再只对对方气泡调用视觉模型读取文字，最后交给文本模型生成回复。YOLO 未训练或未检测到可信气泡时不会回复。首次启动只建立画面基线，不会立即回复。</p><div class="monitor-controls"><label class="check-row"><input id="wechat-auto-reply" type="checkbox" /><span>检测到新消息后自动回复</span></label><label class="interval-row">检查间隔 <input id="wechat-interval" type="number" min="3" max="30" step="1" /> 秒</label></div><div class="monitor-buttons"><button id="start-wechat-monitor" class="primary-button">开始监听</button><button id="stop-wechat-monitor" class="outline-button">停止监听</button><button id="open-wechat-debug" class="outline-button">打开识图调试</button></div><p id="wechat-monitor-status" class="status-text" aria-live="polite"></p></article>
           <article class="info-card file-delete-card"><strong>资源管理器右键删除</strong><p>Windows 文件右键菜单已加入“通过 listagent 删除”。点击后桌宠会移动到当前文件操作位置，播放“删除文件时”动画（未设置时沿用移动动图），然后将文件移入回收站。</p></article>
           <p class="warning">自动回复必须同时开启“自动执行已授权操作”。YOLO 无法确认气泡、视觉模型无法读取文字或文字已处理过时，不会发送消息。</p>
+        </section>
+
+        <section id="panel-companion" class="panel">
+          <header class="panel-header companion-header"><div><p class="eyebrow">一起生活</p><h1>陪伴记录</h1></div><span id="record-live" class="record-live" role="status"><i></i>实时更新</span></header>
+          <section class="record-intro"><strong>把每一次相遇记下来</strong><p>记录只保存在本机，不会上传。启动时长会在桌宠运行期间持续更新，移动距离包含自动移动、拖动与坐到窗口等移动。</p></section>
+          <div class="record-grid" aria-live="polite">
+            <article class="record-metric record-metric-primary"><span class="record-label">本次启动</span><strong id="record-session-duration">0 秒</strong><small>从本次打开 listagent 开始</small></article>
+            <article class="record-metric"><span class="record-label">累计陪伴</span><strong id="record-lifetime-duration">0 小时</strong><small><span id="record-session-count">0</span> 次启动</small></article>
+            <article class="record-metric"><span class="record-label">桌面移动</span><strong id="record-movement-distance">0 px</strong><small>自动移动、拖动与坐到窗口都会累计</small></article>
+            <article class="record-metric"><span class="record-label">对话条数</span><strong id="record-conversations">0</strong><small>包含气泡、控制面板和微信代答</small></article>
+            <article class="record-metric record-metric-wide"><span class="record-label">模型 Token</span><strong id="record-tokens">0</strong><small id="record-token-breakdown">等待模型返回用量；未提供用量时显示估算值。</small></article>
+          </div>
+          <p id="record-updated" class="field-help record-updated">正在读取陪伴记录…</p>
         </section>
 
         <section id="panel-personalization" class="panel">

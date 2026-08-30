@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 const PETS_DIR = path.join(DATA_DIR, 'pets');
+const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const MAX_PERSONA_TEXT_LENGTH = 50000;
 const DEFAULT_UPDATE_REPOSITORY = 'qianchengst/listagent';
@@ -25,7 +26,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     name: '小列',
     relationship: '值得信任的搭档',
     description: '友好、简洁、会主动说明电脑操作影响的桌面助理。',
-    examples: '用户：帮我打开记事本\n小列：可以。我会先请求你的确认，再打开记事本。'
+    examples: '用户：帮我打开记事本\n小列：可以。我会先请求你的确认，再打开记事本。',
+    avatarPath: ''
   },
   pet: {
     idleAssetPath: '',
@@ -55,6 +57,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   automation: {
     enabled: false,
     autoExecute: false,
+    startAtLogin: false,
     perchOffsetPx: 0,
     restMode: false,
     restOffsetPx: 0,
@@ -105,6 +108,7 @@ function mergeSettings(saved = {}) {
   result.pet.scale = result.pet.masterScale;
   result.automation.perchOffsetPx = Math.min(160, Math.max(-160, Math.round(Number(result.automation.perchOffsetPx) || 0)));
   result.automation.restMode = result.automation.restMode === true;
+  result.automation.startAtLogin = result.automation.startAtLogin === true;
   result.automation.restOffsetPx = Math.min(200, Math.max(0, Math.round(Number(result.automation.restOffsetPx) || 0)));
   result.automation.movementPauseMinMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(result.automation.movementPauseMinMs) || 30 * 1000)));
   result.automation.movementPauseMaxMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(result.automation.movementPauseMaxMs) || 90 * 1000)));
@@ -153,6 +157,7 @@ function mergeSettings(saved = {}) {
 
 function ensureDataDirectories() {
   fs.mkdirSync(PETS_DIR, { recursive: true });
+  fs.mkdirSync(AVATARS_DIR, { recursive: true });
   if (!fs.existsSync(SETTINGS_PATH)) {
     fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(cloneDefault(), null, 2)}\n`, 'utf8');
   }
@@ -251,6 +256,7 @@ function saveSettings(patch) {
   if (input.automation && typeof input.automation === 'object') {
     if (Object.prototype.hasOwnProperty.call(input.automation, 'enabled')) next.automation.enabled = input.automation.enabled === true;
     if (Object.prototype.hasOwnProperty.call(input.automation, 'autoExecute')) next.automation.autoExecute = input.automation.autoExecute === true;
+    if (Object.prototype.hasOwnProperty.call(input.automation, 'startAtLogin')) next.automation.startAtLogin = input.automation.startAtLogin === true;
     if (Number.isFinite(Number(input.automation.perchOffsetPx))) {
       next.automation.perchOffsetPx = Math.min(160, Math.max(-160, Math.round(Number(input.automation.perchOffsetPx))));
     }
@@ -290,6 +296,29 @@ function saveSettings(patch) {
 function isProjectPet(filePath) {
   const resolved = path.resolve(filePath || '');
   return resolved.startsWith(`${path.resolve(PETS_DIR)}${path.sep}`);
+}
+
+function isProjectAvatar(filePath) {
+  const resolved = path.resolve(filePath || '');
+  return resolved.startsWith(`${path.resolve(AVATARS_DIR)}${path.sep}`);
+}
+
+function importPersonaAvatar(sourcePath) {
+  ensureDataDirectories();
+  const source = path.resolve(sourcePath || '');
+  const extension = path.extname(source).toLowerCase();
+  const validExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+  if (!validExtensions.has(extension)) throw new Error('只支持 PNG、JPG、WebP 或 GIF 图片。');
+  const stat = fs.statSync(source);
+  const maxBytes = 10 * 1024 * 1024;
+  if (!stat.isFile() || stat.size > maxBytes) throw new Error('头像图片大小不得超过 10MB。');
+
+  const destination = path.join(AVATARS_DIR, `${Date.now()}-${crypto.randomUUID()}${extension}`);
+  fs.copyFileSync(source, destination);
+  const settings = readSettings();
+  settings.persona.avatarPath = destination;
+  writeSettings(settings);
+  return destination;
 }
 
 function importPetAsset(sourcePath, state = 'idle') {
@@ -391,10 +420,27 @@ function toPublicPetAsset(assetPath) {
   return asset;
 }
 
+function toPublicPersonaAvatar(avatarPath) {
+  const pathIsSafe = avatarPath && isProjectAvatar(avatarPath) && fs.existsSync(avatarPath);
+  const extension = path.extname(avatarPath || '').toLowerCase();
+  if (!pathIsSafe || !['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension)) return { url: '', type: '' };
+  return {
+    url: pathToFileURL(avatarPath).href,
+    type: extension === '.gif' ? 'gif' : 'image'
+  };
+}
+
 function toPublicSettings(settings = readSettings()) {
   const copy = mergeSettings(settings);
   return {
     ...copy,
+    persona: {
+      name: copy.persona.name,
+      relationship: copy.persona.relationship,
+      description: copy.persona.description,
+      examples: copy.persona.examples,
+      avatar: toPublicPersonaAvatar(copy.persona.avatarPath)
+    },
     api: {
       textBaseUrl: copy.api.textBaseUrl,
       visionBaseUrl: copy.api.visionBaseUrl,
@@ -429,6 +475,7 @@ module.exports = {
   SETTINGS_PATH,
   ensureDataDirectories,
   importPetAsset,
+  importPersonaAvatar,
   readSettings,
   saveSettings,
   toPublicSettings

@@ -7,11 +7,13 @@ const {
   PROJECT_ROOT,
   ensureDataDirectories,
   importPetAsset,
+  importPersonaAvatar,
   readSettings,
   saveSettings,
   toPublicSettings
 } = require('./settings-service');
-const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting } = require('./agent-service');
+const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getModelUsageTotals, getSessionHistory, recordGreeting } = require('./agent-service');
+const { finishSession, getRecord: getCompanionRecord, recordConversation, recordModelUsage, recordMovement, startSession } = require('./companion-record-service');
 const { getWeChatStatus, captureWeChatWindow, sendTextToActiveWeChat } = require('./automation-service');
 const { detectWeChatBubble, stopWorker } = require('./yolo-service');
 const { findTopmostUnmaximizedWindows } = require('./topmost-window-service');
@@ -61,6 +63,7 @@ let taskDepth = 0;
 let autoMoving = false;
 let randomMoveTimer;
 let moveAnimationTimer;
+let autoMoveWatchdogTimer;
 let dragOriginPerchedWindowInfo;
 let lockingPetViewport = false;
 let perchedOnWindow = false;
@@ -99,6 +102,9 @@ let deleteRequestBusy = false;
 let deleteRequestPath = '';
 let petWindowScale = 1;
 let restModeActive = false;
+let companionRecordTimer;
+let companionUsageCheckpoint = { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedRequests: 0 };
+const AUTO_MOVE_WATCHDOG_MS = 5000;
 
 function deleteTargetFromArgv(argv = process.argv) {
   const values = Array.isArray(argv) ? argv.map((value) => String(value ?? '')) : [];
@@ -142,6 +148,26 @@ async function registerWindowsContextMenu() {
   await execFileAsync('reg.exe', ['ADD', key, '/ve', '/t', 'REG_SZ', '/d', label, '/f'], options);
   await execFileAsync('reg.exe', ['ADD', key, '/v', 'Icon', '/t', 'REG_SZ', '/d', process.execPath, '/f'], options);
   await execFileAsync('reg.exe', ['ADD', commandKey, '/ve', '/t', 'REG_SZ', '/d', command, '/f'], options);
+}
+
+function syncLoginItemSettings(enabled) {
+  const desired = enabled === true;
+  if (process.platform !== 'win32' || typeof app.setLoginItemSettings !== 'function') return desired;
+  const options = { openAtLogin: desired };
+  // In development Electron is the executable, so the project path must be
+  // passed as an argument. Packaged/portable builds use their own executable
+  // path automatically and should not retain a development path.
+  if (process.defaultApp) {
+    options.path = process.execPath;
+    options.args = [app.getAppPath()];
+  }
+  try {
+    app.setLoginItemSettings(options);
+    return desired;
+  } catch (error) {
+    console.warn(`设置开机自启动失败：${error.message}`);
+    return false;
+  }
 }
 
 function deleteAnimationAsset() {
@@ -249,6 +275,7 @@ function movePetLinearly(destination, metadata = {}) {
     y: Math.round(destination.y)
   };
   const distance = Math.hypot(target.x - start.x, target.y - start.y);
+  recordMovement(distance);
   emitMovementState(true);
   if (distance < 2) {
     emitMovementState(false, metadata);
@@ -394,6 +421,42 @@ function warmGreetingCache() {
   for (const surface of ['console', 'bubble']) {
     getGreeting(settings, surface).catch(() => {});
   }
+}
+
+function syncCompanionUsage() {
+  const totals = getModelUsageTotals();
+  const delta = {
+    promptTokens: Math.max(0, Number(totals.promptTokens) - companionUsageCheckpoint.promptTokens),
+    completionTokens: Math.max(0, Number(totals.completionTokens) - companionUsageCheckpoint.completionTokens),
+    totalTokens: Math.max(0, Number(totals.totalTokens) - companionUsageCheckpoint.totalTokens),
+    estimated: Number(totals.estimatedRequests) > companionUsageCheckpoint.estimatedRequests
+  };
+  if (delta.totalTokens || delta.promptTokens || delta.completionTokens) recordModelUsage(delta);
+  companionUsageCheckpoint = {
+    requests: Number(totals.requests) || 0,
+    promptTokens: Number(totals.promptTokens) || 0,
+    completionTokens: Number(totals.completionTokens) || 0,
+    totalTokens: Number(totals.totalTokens) || 0,
+    estimatedRequests: Number(totals.estimatedRequests) || 0
+  };
+}
+
+function broadcastCompanionRecord() {
+  syncCompanionUsage();
+  const record = getCompanionRecord();
+  if (consoleWindow && !consoleWindow.isDestroyed()) consoleWindow.webContents.send('companion:record-changed', record);
+  return record;
+}
+
+function startCompanionRecordMonitor() {
+  if (companionRecordTimer) return;
+  companionRecordTimer = setInterval(() => broadcastCompanionRecord(), 5000);
+}
+
+function stopCompanionRecordMonitor() {
+  if (companionRecordTimer) clearInterval(companionRecordTimer);
+  companionRecordTimer = undefined;
+  syncCompanionUsage();
 }
 
 function hasTextModelConnection(settings) {
@@ -633,6 +696,28 @@ function scheduleRandomMove() {
   }, delayMs);
 }
 
+function startAutoMoveWatchdog() {
+  if (autoMoveWatchdogTimer) return;
+  autoMoveWatchdogTimer = setInterval(() => {
+    // Keep the in-memory flag aligned with settings even when a settings file
+    // was changed by another process or an older renderer.  A stale rest flag
+    // would otherwise block every natural-movement attempt until restart.
+    const configuredRestMode = readSettings().automation.restMode === true;
+    if (configuredRestMode !== restModeActive) {
+      syncRestMode(toPublicSettings(readSettings()));
+    }
+    // A task or an open panel can legitimately pause movement. Once the
+    // blocking condition clears, this watchdog recreates a lost timer instead
+    // of requiring another UI event to kick the scheduler.
+    if (!randomMoveTimer && !autoMoving && !restModeActive) scheduleRandomMove();
+  }, AUTO_MOVE_WATCHDOG_MS);
+}
+
+function stopAutoMoveWatchdog() {
+  if (autoMoveWatchdogTimer) clearInterval(autoMoveWatchdogTimer);
+  autoMoveWatchdogTimer = undefined;
+}
+
 function chooseFreeDestination(bounds) {
   const workArea = screen.getDisplayMatching(bounds).workArea;
   const minX = workArea.x + 12;
@@ -725,6 +810,7 @@ async function startRandomMove() {
   if (!canAutoMove()) return;
   const destination = target.position;
   const distance = Math.hypot(destination.x - start.x, destination.y - start.y);
+  recordMovement(distance);
   if (distance < 2) {
     perchedOnWindow = target.perched;
     perchedWindowInfo = target.windowInfo;
@@ -1099,6 +1185,7 @@ function openConsole() {
   consoleWindow.show();
   consoleWindow.focus();
   sendChatHistory(consoleWindow);
+  broadcastCompanionRecord();
 }
 
 function broadcastConfig(patch = {}) {
@@ -1208,6 +1295,8 @@ async function pollWechatMonitor() {
       return;
     }
     await sendTextToActiveWeChat(answer.reply, true);
+    recordConversation();
+    broadcastCompanionRecord();
     wechatLastRepliedMessageKey = messageKey;
     emitWechatMonitor({ state: 'replied', message: `已自动回复微信消息：${answer.reply.slice(0, 120)}` });
   } catch (error) {
@@ -1279,6 +1368,9 @@ function registerIpc() {
   ipcMain.handle('config:get', () => toPublicSettings(readSettings()));
   ipcMain.handle('config:save', (_event, patch) => {
     saveSettings(patch);
+    if (patch?.automation && Object.prototype.hasOwnProperty.call(patch.automation, 'startAtLogin')) {
+      syncLoginItemSettings(patch.automation.startAtLogin);
+    }
     const config = broadcastConfig(patch);
     if (patch?.automation && Object.prototype.hasOwnProperty.call(patch.automation, 'perchOffsetPx')) {
       repositionPerchedPet();
@@ -1321,6 +1413,16 @@ function registerIpc() {
     saveSettings({ persona: { [personaField]: readPersonaTextFile(answer.filePaths[0]) } });
     return { config: broadcastConfig(), imported: true };
   });
+  ipcMain.handle('persona:choose-avatar', async () => {
+    const answer = await dialog.showOpenDialog({
+      title: '选择聊天头像',
+      properties: ['openFile'],
+      filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+    });
+    if (answer.canceled || !answer.filePaths[0]) return toPublicSettings(readSettings());
+    importPersonaAvatar(answer.filePaths[0]);
+    return broadcastConfig();
+  });
   ipcMain.handle('pet:drag-start', () => {
     stopAutoMove();
     dragOriginPerchedWindowInfo = perchedOnWindow ? perchedWindowInfo : undefined;
@@ -1331,7 +1433,11 @@ function registerIpc() {
     return petWindow?.getBounds() || { x: 0, y: 0 };
   });
   ipcMain.on('pet:drag-move', (_event, x, y) => {
-    if (userDragging) positionPet(x, y);
+    if (!userDragging || !petWindow || petWindow.isDestroyed()) return;
+    const before = petWindow.getBounds();
+    positionPet(x, y);
+    const after = petWindow.getBounds();
+    recordMovement(Math.hypot(after.x - before.x, after.y - before.y), { count: false });
   });
   ipcMain.handle('pet:drag-end', async (_event, moved) => {
     userDragging = false;
@@ -1347,6 +1453,8 @@ function registerIpc() {
   ipcMain.on('pet:scale', (_event, scale) => resizePetWindow(scale));
   ipcMain.handle('agent:chat', (_event, text) => runTask(async () => {
     const answer = await chat(readSettings(), text);
+    recordConversation();
+    broadcastCompanionRecord();
     if (answer.actions?.length) openConfirmationWindow(answer.actions);
     return answer;
   }));
@@ -1356,6 +1464,7 @@ function registerIpc() {
     return greeting;
   });
   ipcMain.handle('agent:history', () => getSessionHistory());
+  ipcMain.handle('companion:record', () => broadcastCompanionRecord());
   ipcMain.handle('agent:record-greeting', (_event, greeting) => {
     const history = recordGreeting(greeting);
     sendChatHistory(consoleWindow);
@@ -1409,6 +1518,10 @@ app.whenReady().then(() => {
     console.error(`注册资源管理器右键菜单失败：${error.message}`);
   });
   restModeActive = readSettings().automation.restMode === true;
+  syncLoginItemSettings(readSettings().automation.startAtLogin === true);
+  startSession();
+  startAutoMoveWatchdog();
+  startCompanionRecordMonitor();
   // Start both greeting requests before either chat surface is opened. The
   // renderer then consumes the shared in-flight request or its cached result.
   warmGreetingCache();
@@ -1434,7 +1547,10 @@ app.on('before-quit', () => {
   // Electron closes, while hiding individual windows remains non-destructive.
   clearSession();
   stopAutoMove();
+  stopAutoMoveWatchdog();
   stopWechatMonitor();
   stopWellbeingMonitor();
+  stopCompanionRecordMonitor();
+  finishSession();
   stopWorker();
 });

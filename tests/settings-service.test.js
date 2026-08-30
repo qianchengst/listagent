@@ -55,6 +55,12 @@ test('persona relationship is preserved and has a useful default', () => {
   assert.equal(customSettings.persona.relationship, '我的博士');
 });
 
+test('persona avatar is exposed as a safe public URL without leaking its path', () => {
+  const publicSettings = toPublicSettings({ persona: { avatarPath: 'C:\\outside\\avatar.png' } });
+  assert.deepEqual(publicSettings.persona.avatar, { url: '', type: '' });
+  assert.equal('avatarPath' in publicSettings.persona, false);
+});
+
 test('ui skin is restricted to the supported choices', () => {
   assert.equal(toPublicSettings({ ui: { skin: 'refined' } }).ui.skin, 'refined');
   assert.equal(toPublicSettings({ ui: { skin: 'reference' } }).ui.skin, 'reference');
@@ -82,6 +88,7 @@ test('pet scales expose independent 20%–200% values and a shared master scale'
 test('rest state and movement pause range expose safe defaults and bounds', () => {
   const defaults = toPublicSettings({}).automation;
   assert.equal(defaults.restMode, false);
+  assert.equal(defaults.startAtLogin, false);
   assert.equal(defaults.restOffsetPx, 0);
   assert.equal(defaults.movementPauseMinMs, 30 * 1000);
   assert.equal(defaults.movementPauseMaxMs, 90 * 1000);
@@ -95,6 +102,11 @@ test('rest state and movement pause range expose safe defaults and bounds', () =
   assert.equal(bounded.automation.movementPauseMinMs, 10 * 1000);
   assert.equal(bounded.automation.movementPauseMaxMs, 10 * 60 * 1000);
   assert.equal('rest' in bounded.pet, true);
+});
+
+test('startup setting is normalized to a boolean', () => {
+  assert.equal(toPublicSettings({ automation: { startAtLogin: true } }).automation.startAtLogin, true);
+  assert.equal(toPublicSettings({ automation: { startAtLogin: 'yes' } }).automation.startAtLogin, false);
 });
 
 test('perch offset is bounded to a safe vertical range', () => {

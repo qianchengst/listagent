@@ -528,6 +528,14 @@
     let historyRevision = 0;
     let historyReady = false;
     let pendingHistory;
+    const recordSessionDuration = el('#record-session-duration');
+    const recordLifetimeDuration = el('#record-lifetime-duration');
+    const recordSessionCount = el('#record-session-count');
+    const recordMovementDistance = el('#record-movement-distance');
+    const recordConversations = el('#record-conversations');
+    const recordTokens = el('#record-tokens');
+    const recordTokenBreakdown = el('#record-token-breakdown');
+    const recordUpdated = el('#record-updated');
     const movementPauseStatus = el('#movement-pause-status');
     const MOVE_PAUSE_MIN_SECONDS = 10;
     const MOVE_PAUSE_MAX_SECONDS = 10 * 60;
@@ -589,6 +597,43 @@
       }
     };
 
+    const formatRecordDuration = (milliseconds) => {
+      const totalSeconds = Math.max(0, Math.floor((Number(milliseconds) || 0) / 1000));
+      if (totalSeconds < 60) return `${totalSeconds} 秒`;
+      const totalMinutes = Math.floor(totalSeconds / 60);
+      if (totalMinutes < 60) return `${totalMinutes} 分钟`;
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return minutes ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`;
+    };
+    const formatRecordDistance = (pixels) => {
+      const value = Math.max(0, Number(pixels) || 0);
+      if (value < 1000) return `${Math.round(value)} px`;
+      return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)} k px`;
+    };
+    const formatRecordNumber = (value) => Math.max(0, Math.round(Number(value) || 0)).toLocaleString('zh-CN');
+    function applyCompanionRecord(record = {}) {
+      if (recordSessionDuration) recordSessionDuration.textContent = formatRecordDuration(record.currentSessionMs);
+      if (recordLifetimeDuration) recordLifetimeDuration.textContent = formatRecordDuration(record.activeMs);
+      if (recordSessionCount) recordSessionCount.textContent = formatRecordNumber(record.totalSessions);
+      if (recordMovementDistance) recordMovementDistance.textContent = formatRecordDistance(record.totalMovementPx);
+      if (recordConversations) recordConversations.textContent = formatRecordNumber(record.totalConversations);
+      if (recordTokens) recordTokens.textContent = formatRecordNumber(record.totalTokens);
+      if (recordTokenBreakdown) {
+        const prompt = formatRecordNumber(record.totalPromptTokens);
+        const completion = formatRecordNumber(record.totalCompletionTokens);
+        const estimated = Number(record.estimatedTokenRequests) > 0 ? `；其中 ${formatRecordNumber(record.estimatedTokenRequests)} 次为估算` : '';
+        recordTokenBreakdown.textContent = `${prompt} 输入 / ${completion} 输出${estimated}`;
+      }
+      if (recordUpdated) {
+        const updatedAt = record.updatedAt ? new Date(record.updatedAt) : null;
+        recordUpdated.textContent = updatedAt && !Number.isNaN(updatedAt.getTime())
+          ? `最近更新：${updatedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · 数据仅保存在本机`
+          : '数据仅保存在本机';
+      }
+    }
+    api.onCompanionRecordChanged(applyCompanionRecord);
+
     function formatMegabytes(bytes) {
       const value = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
       return value >= 100 ? value.toFixed(0) : value.toFixed(1);
@@ -605,12 +650,52 @@
 
     api.onUpdateProgress(renderUpdateProgress);
 
+    function applyAvatarElement(element) {
+      if (!element) return;
+      const image = element.querySelector('.avatar-image');
+      const url = config?.persona?.avatar?.url || '';
+      if (image) {
+        if (url) {
+          if (image.getAttribute('src') !== url) image.src = url;
+          image.hidden = false;
+        } else {
+          image.removeAttribute('src');
+          image.hidden = true;
+        }
+      }
+      element.classList.toggle('has-avatar', Boolean(url));
+    }
+
+    function refreshAvatars() {
+      messages.querySelectorAll('.avatar').forEach(applyAvatarElement);
+    }
+
+    function renderPersonaAvatarPreview() {
+      const preview = el('#persona-avatar-preview');
+      const image = el('#persona-avatar-preview-image');
+      const empty = el('#persona-avatar-preview-empty');
+      const url = config?.persona?.avatar?.url || '';
+      if (!preview || !image || !empty) return;
+      if (url) {
+        image.src = url;
+        image.hidden = false;
+        empty.hidden = true;
+      } else {
+        image.removeAttribute('src');
+        image.hidden = true;
+        empty.hidden = false;
+      }
+      preview.classList.toggle('has-avatar', Boolean(url));
+    }
+
     function applyConfig(next) {
       config = next;
       const skin = ['classic', 'refined', 'reference', 'pepe'].includes(config.ui?.skin) ? config.ui.skin : 'classic';
       document.documentElement.dataset.skin = skin;
       el('#chat-name').textContent = config.persona.name;
       el('#persona-name').value = config.persona.name;
+      renderPersonaAvatarPreview();
+      refreshAvatars();
       el('#persona-relationship').value = config.persona.relationship || '';
       el('#persona-description').value = config.persona.description;
       el('#persona-examples').value = config.persona.examples;
@@ -625,6 +710,7 @@
       el('#vision-key-state').textContent = config.api.visionApiKeySet ? '视觉 API Key 已保存（为安全起见不回显）' : '视觉 API Key 尚未保存';
       el('#automation-enabled').checked = config.automation.enabled;
       el('#automation-auto-execute').checked = config.automation.autoExecute === true;
+      el('#automation-start-at-login').checked = config.automation.startAtLogin === true;
       el('#rest-mode').checked = config.automation.restMode === true;
       const restOffset = Math.round(Number(config.automation.restOffsetPx) || 0);
       el('#rest-offset').value = restOffset;
@@ -692,7 +778,8 @@
       if (role === 'assistant') {
         const avatar = document.createElement('div');
         avatar.className = 'avatar';
-        avatar.innerHTML = '<span class="avatar-glyph">✦</span><svg class="avatar-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.4 9l5.9 1-4.4 4.1 1 5.9-4.9-2.8-4.9 2.8 1-5.9-4.4-4.1 5.9-1L12 3.5Z"/></svg>';
+        avatar.innerHTML = '<img class="avatar-image" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="" hidden /><span class="avatar-glyph">✦</span><svg class="avatar-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.4 9l5.9 1-4.4 4.1 1 5.9-4.9-2.8-4.9 2.8 1-5.9-4.4-4.1 5.9-1L12 3.5Z"/></svg>';
+        applyAvatarElement(avatar);
         row.append(avatar);
       }
       const bubble = document.createElement('div');
@@ -822,6 +909,18 @@
       }
     }
 
+    async function choosePersonaAvatar() {
+      const status = el('#persona-import-status');
+      status.textContent = '正在选择聊天头像…';
+      try {
+        const next = await api.choosePersonaAvatar();
+        applyConfig(next);
+        status.textContent = next.persona?.avatar?.url ? '聊天头像已更新。' : '已取消选择。';
+      } catch (error) {
+        status.textContent = `头像导入失败：${error.message}`;
+      }
+    }
+
     document.querySelectorAll('.tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
@@ -842,6 +941,7 @@
       addMessage('assistant', '本次对话已清空。我们重新开始吧。');
     });
     document.querySelector('[data-save="persona"]').addEventListener('click', savePersona);
+    el('#choose-persona-avatar').addEventListener('click', choosePersonaAvatar);
     document.querySelector('[data-save="connection"]').addEventListener('click', saveConnection);
     el('#check-updates').addEventListener('click', async () => {
       const status = el('#update-status');
@@ -914,6 +1014,15 @@
     });
     el('#automation-auto-execute').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { autoExecute: event.target.checked } }));
+    });
+    el('#automation-start-at-login').addEventListener('change', async (event) => {
+      const input = event.target;
+      try {
+        applyConfig(await api.saveConfig({ automation: { startAtLogin: input.checked } }));
+      } catch (error) {
+        input.checked = !input.checked;
+        window.alert(`开机自启动设置失败：${error.message}`);
+      }
     });
     el('#rest-mode').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { restMode: event.target.checked } }));
@@ -1136,6 +1245,7 @@
     el('#quit').addEventListener('click', () => api.quit());
 
     applyConfig(await api.getConfig());
+    try { applyCompanionRecord(await api.getCompanionRecord()); } catch { /* metrics remain at zero if persistence is unavailable. */ }
     let history = [];
     try { history = await api.getChatHistory(); } catch { /* use an empty transcript if persistence is unavailable. */ }
     if (Array.isArray(pendingHistory)) history = pendingHistory;

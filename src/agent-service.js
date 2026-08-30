@@ -17,6 +17,13 @@ const pendingActions = new Map();
 const HISTORY_PATH = path.join(PROJECT_ROOT, 'data', 'conversation-history.json');
 let sessionsLoaded = false;
 let startupGreetingRecorded = false;
+const modelUsageTotals = {
+  requests: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  estimatedRequests: 0
+};
 
 function loadPersistedSessions() {
   if (sessionsLoaded) return;
@@ -136,6 +143,48 @@ function messageText(content) {
   return '';
 }
 
+function usageNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function estimateModelUsage(messages, message) {
+  const serialized = JSON.stringify(messages || []).replace(/data:[^,]+;base64,[A-Za-z0-9+/=]+/gu, '[image]');
+  const imageCount = (JSON.stringify(messages || []).match(/"image_url"/gu) || []).length;
+  const promptTokens = Math.max(1, Math.ceil(serialized.length / 4) + imageCount * 900);
+  const completionTokens = Math.max(1, Math.ceil(messageText(message?.content).length / 4));
+  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, estimated: true };
+}
+
+function normalizeModelUsage(usage, messages, message) {
+  const promptTokens = usageNumber(usage?.prompt_tokens ?? usage?.promptTokens);
+  const completionTokens = usageNumber(usage?.completion_tokens ?? usage?.completionTokens);
+  const reportedTotal = usageNumber(usage?.total_tokens ?? usage?.totalTokens);
+  if (promptTokens || completionTokens || reportedTotal) {
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: reportedTotal || promptTokens + completionTokens,
+      estimated: usage?.estimated === true
+    };
+  }
+  return estimateModelUsage(messages, message);
+}
+
+function registerModelUsage(usage, messages, message) {
+  const normalized = normalizeModelUsage(usage, messages, message);
+  modelUsageTotals.requests += 1;
+  modelUsageTotals.promptTokens += normalized.promptTokens;
+  modelUsageTotals.completionTokens += normalized.completionTokens;
+  modelUsageTotals.totalTokens += normalized.totalTokens;
+  if (normalized.estimated) modelUsageTotals.estimatedRequests += 1;
+  return normalized;
+}
+
+function getModelUsageTotals() {
+  return { ...modelUsageTotals };
+}
+
 function textSessionMessages(session) {
   return session.map((message) => {
     if (!message || typeof message !== 'object') return message;
@@ -180,6 +229,9 @@ function filterWechatSendControls(yoloDetection, imageBase64) {
     }
   } catch { /* keep the unfiltered result if the image cannot be decoded */ }
   if (!imageWidth || !imageHeight) return yoloDetection;
+    // WeChat's send button is a compact control in the lower-right toolbar.
+    // Incoming bubbles are left aligned, so only filter an `other` detection
+    // when all of these UI-control geometry conditions are true.
   const isSendControl = (detection) => {
     const sender = normalizeWechatSender(detection?.sender);
     const x = Number(detection?.x) || 0;
@@ -188,9 +240,6 @@ function filterWechatSendControls(yoloDetection, imageBase64) {
     const boxWidth = Math.max(0, right - x);
     const boxHeight = Math.max(0, bottom - (Number(detection?.y) || 0));
     const centerX = (x + right) / 2 / imageWidth;
-    // WeChat's send button is a compact control in the lower-right toolbar.
-    // Incoming bubbles are left aligned, so only filter an `other` detection
-    // when all of these UI-control geometry conditions are true.
     return sender === 'other'
       && centerX >= 0.68
       && bottom / imageHeight >= 0.84
@@ -547,6 +596,7 @@ async function requestCompletion(settings, session, options = {}) {
   if (!baseUrl || !apiKey || !model) {
     throw new Error('请先在“连接”页面填写文本 API Base URL、文本模型名和文本 API Key。');
   }
+  const requestMessages = [makeSystemMessage(settings), ...(requiresVision ? session : textSessionMessages(session))];
   let response;
   try {
     response = await fetch(`${baseUrl}/chat/completions`, {
@@ -560,7 +610,7 @@ async function requestCompletion(settings, session, options = {}) {
         // A previous app version could leave an image content part in the
         // in-memory session. Text providers must only receive plain text;
         // vision requests use their isolated prompt below instead.
-        messages: [makeSystemMessage(settings), ...(requiresVision ? session : textSessionMessages(session))],
+        messages: requestMessages,
         temperature: settings.api.temperature,
         ...(options.allowTools === false ? {} : { tools: TOOL_DEFINITIONS, tool_choice: 'auto' })
       }),
@@ -578,17 +628,21 @@ async function requestCompletion(settings, session, options = {}) {
   const payload = await response.json();
   const message = payload.choices?.[0]?.message;
   if (!message) throw new Error('模型服务未返回可用回复。');
-  return {
+  const usage = normalizeModelUsage(payload.usage, requestMessages, message);
+  const resultMessage = {
     role: 'assistant',
     content: messageText(message.content),
     tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls : undefined
   };
+  registerModelUsage(payload.usage, requestMessages, message);
+  Object.defineProperty(resultMessage, 'usage', { value: usage, enumerable: false, configurable: true });
+  return resultMessage;
 }
 
 function responsePayload(message) {
   const groupId = crypto.randomUUID();
   const actions = (message.tool_calls || []).map((toolCall) => createPendingAction(toolCall, groupId)).map(presentAction);
-  return { content: message.content || '', actions };
+  return { content: message.content || '', actions, usage: message.usage || null };
 }
 
 function personaFallbackStyle(settings) {
@@ -1152,4 +1206,4 @@ function clearSession(sessionId = 'default') {
   persistSessions();
 }
 
-module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
+module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
