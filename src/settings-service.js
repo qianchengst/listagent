@@ -8,6 +8,7 @@ const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 const PETS_DIR = path.join(DATA_DIR, 'pets');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const MAX_PERSONA_TEXT_LENGTH = 50000;
+const DEFAULT_UPDATE_REPOSITORY = 'qianchengst/listagent';
 
 const DEFAULT_SETTINGS = Object.freeze({
   version: 2,
@@ -31,6 +32,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     standingAssetPath: '',
     interactionAssetPath: '',
     movingAssetPath: '',
+    restAssetPath: '',
     deleteAnimationAssetPath: '',
     // masterScale is a multiplier shared by all display states.  The
     // individual values remain independent so the master slider never
@@ -40,6 +42,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     standingScale: 1,
     interactionScale: 1,
     movingScale: 1,
+    restScale: 1,
     deleteScale: 1,
     scale: 1
   },
@@ -47,12 +50,16 @@ const DEFAULT_SETTINGS = Object.freeze({
     skin: 'classic'
   },
   update: {
-    repository: ''
+    repository: DEFAULT_UPDATE_REPOSITORY
   },
   automation: {
     enabled: false,
     autoExecute: false,
     perchOffsetPx: 0,
+    restMode: false,
+    restOffsetPx: 0,
+    movementPauseMinMs: 30000,
+    movementPauseMaxMs: 90000,
     wechatMonitorEnabled: false,
     wechatAutoReply: false,
     wechatIntervalMs: 5000,
@@ -75,6 +82,13 @@ function mergeSettings(saved = {}) {
       Object.assign(result[group], saved[group]);
     }
   }
+  // Older installs stored an empty repository. Fill it with the official
+  // project so update checks work immediately after upgrading.
+  if (!String(result.update.repository || '').trim()) {
+    result.update.repository = DEFAULT_UPDATE_REPOSITORY;
+  } else {
+    result.update.repository = String(result.update.repository).trim().slice(0, 200);
+  }
   // Migrate the former single scale slider and clamp all display scales to
   // the supported 20%–200% range.
   const savedPet = saved.pet && typeof saved.pet === 'object' ? saved.pet : {};
@@ -86,9 +100,19 @@ function mergeSettings(saved = {}) {
   result.pet.standingScale = normalizePetScale(savedPet.standingScale, 1);
   result.pet.interactionScale = normalizePetScale(savedPet.interactionScale, 1);
   result.pet.movingScale = normalizePetScale(savedPet.movingScale, 1);
+  result.pet.restScale = normalizePetScale(savedPet.restScale, 1);
   result.pet.deleteScale = normalizePetScale(savedPet.deleteScale, 1);
   result.pet.scale = result.pet.masterScale;
   result.automation.perchOffsetPx = Math.min(160, Math.max(-160, Math.round(Number(result.automation.perchOffsetPx) || 0)));
+  result.automation.restMode = result.automation.restMode === true;
+  result.automation.restOffsetPx = Math.min(200, Math.max(0, Math.round(Number(result.automation.restOffsetPx) || 0)));
+  result.automation.movementPauseMinMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(result.automation.movementPauseMinMs) || 30 * 1000)));
+  result.automation.movementPauseMaxMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(result.automation.movementPauseMaxMs) || 90 * 1000)));
+  if (result.automation.movementPauseMinMs > result.automation.movementPauseMaxMs) {
+    const pause = result.automation.movementPauseMinMs;
+    result.automation.movementPauseMinMs = result.automation.movementPauseMaxMs;
+    result.automation.movementPauseMaxMs = pause;
+  }
   result.automation.wellbeingEnabled = result.automation.wellbeingEnabled !== false;
   result.automation.wellbeingMinIntervalMs = Math.min(180 * 60 * 1000, Math.max(10 * 60 * 1000, Math.round(Number(result.automation.wellbeingMinIntervalMs) || 45 * 60 * 1000)));
   result.automation.wellbeingLongUseThresholdMs = Math.min(240 * 60 * 1000, Math.max(30 * 60 * 1000, Math.round(Number(result.automation.wellbeingLongUseThresholdMs) || 90 * 60 * 1000)));
@@ -211,6 +235,9 @@ function saveSettings(patch) {
         next.pet[key] = normalizePetScale(input.pet[key], next.pet[key]);
       }
     }
+    if (Object.prototype.hasOwnProperty.call(input.pet, 'restScale')) {
+      next.pet.restScale = normalizePetScale(input.pet.restScale, next.pet.restScale);
+    }
   }
 
   if (input.ui && typeof input.ui === 'object') {
@@ -226,6 +253,21 @@ function saveSettings(patch) {
     if (Object.prototype.hasOwnProperty.call(input.automation, 'autoExecute')) next.automation.autoExecute = input.automation.autoExecute === true;
     if (Number.isFinite(Number(input.automation.perchOffsetPx))) {
       next.automation.perchOffsetPx = Math.min(160, Math.max(-160, Math.round(Number(input.automation.perchOffsetPx))));
+    }
+    if (Object.prototype.hasOwnProperty.call(input.automation, 'restMode')) next.automation.restMode = input.automation.restMode === true;
+    if (Number.isFinite(Number(input.automation.restOffsetPx))) {
+      next.automation.restOffsetPx = Math.min(200, Math.max(0, Math.round(Number(input.automation.restOffsetPx))));
+    }
+    if (Number.isFinite(Number(input.automation.movementPauseMinMs))) {
+      next.automation.movementPauseMinMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(input.automation.movementPauseMinMs))));
+    }
+    if (Number.isFinite(Number(input.automation.movementPauseMaxMs))) {
+      next.automation.movementPauseMaxMs = Math.min(10 * 60 * 1000, Math.max(10 * 1000, Math.round(Number(input.automation.movementPauseMaxMs))));
+    }
+    if (next.automation.movementPauseMinMs > next.automation.movementPauseMaxMs) {
+      const pause = next.automation.movementPauseMinMs;
+      next.automation.movementPauseMinMs = next.automation.movementPauseMaxMs;
+      next.automation.movementPauseMaxMs = pause;
     }
     if (Object.prototype.hasOwnProperty.call(input.automation, 'wechatMonitorEnabled')) next.automation.wechatMonitorEnabled = input.automation.wechatMonitorEnabled === true;
     if (Object.prototype.hasOwnProperty.call(input.automation, 'wechatAutoReply')) next.automation.wechatAutoReply = input.automation.wechatAutoReply === true;
@@ -258,11 +300,13 @@ function importPetAsset(sourcePath, state = 'idle') {
       ? 'standingAssetPath'
       : state === 'interaction'
         ? 'interactionAssetPath'
-        : state === 'delete'
-          ? 'deleteAnimationAssetPath'
-          : state === 'idle'
-            ? 'idleAssetPath'
-            : '';
+        : state === 'rest'
+          ? 'restAssetPath'
+          : state === 'delete'
+            ? 'deleteAnimationAssetPath'
+            : state === 'idle'
+              ? 'idleAssetPath'
+              : '';
   if (!targetKey) throw new Error('桌宠素材状态无效。');
   const validExtensions = new Set(['.gif', '.webm']);
   const source = path.resolve(sourcePath);
@@ -367,11 +411,13 @@ function toPublicSettings(settings = readSettings()) {
       standingScale: copy.pet.standingScale,
       interactionScale: copy.pet.interactionScale,
       movingScale: copy.pet.movingScale,
+      restScale: copy.pet.restScale,
       deleteScale: copy.pet.deleteScale,
       idle: toPublicPetAsset(copy.pet.idleAssetPath),
       standing: toPublicPetAsset(copy.pet.standingAssetPath),
       interaction: toPublicPetAsset(copy.pet.interactionAssetPath),
       moving: toPublicPetAsset(copy.pet.movingAssetPath),
+      rest: toPublicPetAsset(copy.pet.restAssetPath),
       deleteAnimation: toPublicPetAsset(copy.pet.deleteAnimationAssetPath)
     }
   };

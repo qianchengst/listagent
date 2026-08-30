@@ -86,6 +86,19 @@
                 </div>
                 <button id="choose-idle-pet" class="outline-button full">上传坐立 GIF / WebM</button>
               </section>
+              <section class="media-setting rest-media-setting">
+                <div class="media-setting-heading"><strong>休息</strong><span>停在屏幕底部，不自动移动</span></div>
+                <div class="preview-stage">
+                  <img id="rest-preview-image" alt="休息状态预览" hidden />
+                  <video id="rest-preview-video" muted loop autoplay playsinline hidden></video>
+                  <p id="rest-preview-empty" class="preview-empty">尚未上传：将使用坐立动图</p>
+                </div>
+                <button id="choose-rest-pet" class="outline-button full">上传休息 GIF / WebM</button>
+                <label class="check-row rest-mode-toggle"><input id="rest-mode" type="checkbox" /><span>启用休息状态</span></label>
+                <label class="range-label">休息高度 <output id="rest-offset-output">贴底</output>
+                  <input id="rest-offset" type="range" min="0" max="200" step="1" value="0" />
+                </label>
+              </section>
               <section class="media-setting">
                 <div class="media-setting-heading"><strong>站立</strong><span>移动结束后随机显示</span></div>
                 <div class="preview-stage">
@@ -122,7 +135,7 @@
                 </div>
                 <button id="choose-delete-pet" class="outline-button full">上传删除 GIF / WebM</button>
               </section>
-              <p class="field-help">仅支持 GIF 与 WebM；坐立、站立、移动和删除动图最大 40MB，互动动图最大 100MB。未设置站立或移动动图时会使用坐立动图。</p>
+              <p class="field-help">仅支持 GIF 与 WebM；坐立、站立、休息、移动和删除动图最大 40MB，互动动图最大 100MB。未设置其他动图时会使用坐立动图。</p>
               <section class="pet-scale-settings" aria-labelledby="pet-scale-title">
                 <div class="media-setting-heading"><strong id="pet-scale-title">桌宠大小</strong><span>20%–200%</span></div>
                 <label class="range-label pet-scale-master-label">整体倍率（不改变分项数值）<output id="pet-scale-master-output">100%</output>
@@ -140,10 +153,13 @@
                 <label class="range-label">移动动画<output id="pet-scale-moving-output">100%</output>
                   <input id="pet-scale-moving" type="range" min="20" max="200" step="1" value="100" />
                 </label>
+                <label class="range-label">休息动画<output id="pet-scale-rest-output">100%</output>
+                  <input id="pet-scale-rest" type="range" min="20" max="200" step="1" value="100" />
+                </label>
                 <label class="range-label">删除动画<output id="pet-scale-delete-output">100%</output>
                   <input id="pet-scale-delete" type="range" min="20" max="200" step="1" value="100" />
                 </label>
-                <p class="field-help">整体倍率会同时作用于五种状态，但不会改写下面各分项拉条的数值。</p>
+                <p class="field-help">整体倍率会同时作用于六种状态，但不会改写下面各分项拉条的数值。</p>
               </section>
             </article>
             <form id="persona-form" class="form-card">
@@ -178,7 +194,7 @@
               <div id="vision-key-state" class="connection-note">视觉 API Key 尚未保存</div>
             </fieldset>
             <label class="range-label">温度 <output id="temperature-output">0.7</output><input id="temperature" type="range" min="0" max="1.5" step="0.1" value="0.7" /></label>
-            <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="例如：your-name/listagent" /></label>
+            <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="默认：qianchengst/listagent" /></label>
           </form>
           <aside class="info-card"><strong>模型分工</strong><p>普通对话、工具调用和自动化指令使用纯文本连接；只有读取微信截图时才调用视觉连接。两组连接可以分别使用不同平台、Base URL、API Key 和模型。</p></aside>
           <article class="info-card update-card"><strong>应用更新</strong><p>从 GitHub Releases 检查 Windows 便携版更新。新版会先下载更新清单，只传输本机缺少或已变化的程序文件；仅旧 Release 没有清单或 Electron 运行时发生变化时才回退下载完整包。人格、API 设置、聊天记录、模型和桌宠素材都会保留。</p><div class="update-actions"><button id="check-updates" class="outline-button">检查更新</button><button id="install-update" class="primary-button" hidden>立即更新</button><output id="update-progress" class="update-progress" hidden aria-live="polite"></output></div><p id="update-status" class="status-text" aria-live="polite"></p></article>
@@ -196,6 +212,26 @@
             <label class="switch"><input id="automation-auto-execute" type="checkbox" /><span></span></label>
           </article>
           </div>
+          <article class="info-card movement-frequency-card">
+            <div><strong>自然移动频率</strong><p>桌宠每次移动结束后会静止一段时间，再随机移动。两个控制点决定静止时间范围，采用非线性刻度：10 秒至 10 分钟。</p></div>
+            <div id="movement-pause-range" class="dual-range" aria-label="自然移动静止时间范围">
+              <div class="dual-range-track" aria-hidden="true"></div>
+              <div class="dual-range-fill" aria-hidden="true"></div>
+              <button id="movement-pause-min-handle" class="dual-range-thumb" data-handle="min" type="button" role="slider" aria-label="最短静止时间" aria-valuemin="0" aria-valuemax="100" aria-valuenow="26"></button>
+              <button id="movement-pause-max-handle" class="dual-range-thumb" data-handle="max" type="button" role="slider" aria-label="最长静止时间" aria-valuemin="0" aria-valuemax="100" aria-valuenow="52"></button>
+              <input id="movement-pause-min" type="hidden" value="26" />
+              <input id="movement-pause-max" type="hidden" value="52" />
+            </div>
+            <div class="dual-range-ticks" aria-hidden="true">
+              <span style="left: 0%">10 秒</span>
+              <span style="left: 25%">30 秒</span>
+              <span style="left: 50%">1 分</span>
+              <span style="left: 75%">3 分</span>
+              <span style="left: 100%">10 分</span>
+            </div>
+            <div class="dual-range-labels"><span>最短静止 <output id="movement-pause-min-output">30 秒</output></span><span>最长静止 <output id="movement-pause-max-output">90 秒</output></span></div>
+            <p id="movement-pause-status" class="field-help movement-pause-status">拖动圆点或点击刻度调整，松开后自动保存。</p>
+          </article>
           <article class="info-card wellbeing-card">
             <div class="wellbeing-heading"><div><strong>人文关怀提醒</strong><p>桌宠会根据连续使用时长、系统空闲状态和时间段，偶尔用你的人格设定生成一句关心的话，并在气泡中显示。不会读取具体屏幕内容。</p></div><label class="switch"><input id="wellbeing-enabled" type="checkbox" /><span></span></label></div>
             <div class="wellbeing-settings">

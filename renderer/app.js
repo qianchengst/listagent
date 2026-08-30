@@ -59,6 +59,8 @@
     let pendingMovementState;
     let activeMediaState = 'idle';
     let staticPose = 'idle';
+    let perched = false;
+    let resting = false;
     let lastPetScale;
 
     function stateScale(state) {
@@ -82,14 +84,17 @@
       const movingAsset = config?.pet.moving;
       const idleAsset = config?.pet.idle;
       const standingAsset = config?.pet.standing;
+      const restAsset = config?.pet.rest;
       const useMoving = moving && movingAsset?.url;
       // If no dedicated moving asset is configured, keep showing whichever
       // static pose is available instead of making the pet disappear.
-      const useStanding = standingAsset?.url && (staticPose === 'standing' || !idleAsset?.url);
+      const useRest = !moving && resting && !perched && restAsset?.url;
+      const useStanding = !useRest && standingAsset?.url && (staticPose === 'standing' || !idleAsset?.url);
       const asset = useMoving
         ? movingAsset
-        : useStanding ? standingAsset : idleAsset;
-      applyPetScale(useMoving ? 'moving' : useStanding ? 'standing' : 'idle');
+        : useRest ? restAsset : useStanding ? standingAsset : idleAsset;
+      applyPetScale(useMoving ? 'moving' : useRest ? 'rest' : useStanding ? 'standing' : 'idle');
+      shell.classList.toggle('resting', Boolean(resting && !moving && !perched));
       renderMedia(image, video, null, asset);
     }
 
@@ -107,8 +112,9 @@
       pendingMovementState = undefined;
       if (pending) {
         moving = pending.isMoving === true;
+        perched = pending.perched === true;
         if (!moving) {
-          staticPose = pending.perched === true
+          staticPose = perched
             ? 'idle'
             : (config?.pet?.standing?.url && Math.random() < 0.5 ? 'standing' : 'idle');
         }
@@ -191,6 +197,7 @@
     }
     const apply = (nextConfig) => {
       config = nextConfig;
+      resting = config?.automation?.restMode === true;
       drawPet();
     };
     config = await api.getConfig();
@@ -204,8 +211,9 @@
       }
       if (!dragging && !deleteAnimationPlaying) {
         moving = payload.isMoving === true;
+        perched = payload.perched === true;
         if (!moving) {
-          staticPose = payload.perched === true
+          staticPose = perched
             ? 'idle'
             : (config?.pet?.standing?.url && Math.random() < 0.5 ? 'standing' : 'idle');
         }
@@ -230,6 +238,7 @@
       clickStartedWhileStatic = !moving;
       pointerStart = { x: event.screenX, y: event.screenY };
       moving = true;
+      perched = false;
       shell.classList.add('dragging');
       drawPet();
       const bounds = await api.startPetDrag();
@@ -519,6 +528,66 @@
     let historyRevision = 0;
     let historyReady = false;
     let pendingHistory;
+    const movementPauseStatus = el('#movement-pause-status');
+    const MOVE_PAUSE_MIN_SECONDS = 10;
+    const MOVE_PAUSE_MAX_SECONDS = 10 * 60;
+    const MOVEMENT_SLIDER_MIN_GAP = 4;
+    const movementPauseToSlider = (milliseconds) => {
+      const seconds = Math.min(MOVE_PAUSE_MAX_SECONDS, Math.max(MOVE_PAUSE_MIN_SECONDS, Number(milliseconds) / 1000 || 30));
+      return Math.round(Math.log(seconds / MOVE_PAUSE_MIN_SECONDS) / Math.log(MOVE_PAUSE_MAX_SECONDS / MOVE_PAUSE_MIN_SECONDS) * 100);
+    };
+    const movementPauseFromSlider = (value) => {
+      const ratio = Math.min(100, Math.max(0, Number(value) || 0)) / 100;
+      // The settings service stores durations in milliseconds. Keep the
+      // logarithmic slider math in seconds, then convert exactly once here.
+      return Math.round(MOVE_PAUSE_MIN_SECONDS * (MOVE_PAUSE_MAX_SECONDS / MOVE_PAUSE_MIN_SECONDS) ** ratio * 1000);
+    };
+    const formatPauseDuration = (milliseconds) => {
+      const seconds = Math.max(MOVE_PAUSE_MIN_SECONDS, Math.round(Number(milliseconds) / 1000));
+      if (seconds < 60) return `${seconds} 秒`;
+      const minutes = Math.floor(seconds / 60);
+      const restSeconds = seconds % 60;
+      return restSeconds ? `${minutes} 分 ${restSeconds} 秒` : `${minutes} 分钟`;
+    };
+    const updateMovementPauseLabels = () => {
+      const minInput = el('#movement-pause-min');
+      const maxInput = el('#movement-pause-max');
+      let minSlider = Math.min(100 - MOVEMENT_SLIDER_MIN_GAP, Math.max(0, Number(minInput?.value) || 0));
+      let maxSlider = Math.min(100, Math.max(0, Number(maxInput?.value) || 0));
+      if (maxSlider - minSlider < MOVEMENT_SLIDER_MIN_GAP) {
+        if (minSlider + MOVEMENT_SLIDER_MIN_GAP <= 100) maxSlider = minSlider + MOVEMENT_SLIDER_MIN_GAP;
+        else minSlider = maxSlider - MOVEMENT_SLIDER_MIN_GAP;
+      }
+      minInput.value = minSlider;
+      maxInput.value = maxSlider;
+      const minMs = movementPauseFromSlider(minSlider);
+      const maxMs = movementPauseFromSlider(maxSlider);
+      const track = document.querySelector('.dual-range');
+      track?.style.setProperty('--range-start', `${minSlider}%`);
+      track?.style.setProperty('--range-end', `${maxSlider}%`);
+      const minHandle = el('#movement-pause-min-handle');
+      const maxHandle = el('#movement-pause-max-handle');
+      if (minHandle) {
+        minHandle.style.left = `${minSlider}%`;
+        minHandle.setAttribute('aria-valuenow', String(minSlider));
+        minHandle.setAttribute('aria-valuetext', formatPauseDuration(minMs));
+      }
+      if (maxHandle) {
+        maxHandle.style.left = `${maxSlider}%`;
+        maxHandle.setAttribute('aria-valuenow', String(maxSlider));
+        maxHandle.setAttribute('aria-valuetext', formatPauseDuration(maxMs));
+      }
+      const minOutput = el('#movement-pause-min-output');
+      const maxOutput = el('#movement-pause-max-output');
+      if (minOutput) {
+        minOutput.value = formatPauseDuration(minMs);
+        minOutput.textContent = minOutput.value;
+      }
+      if (maxOutput) {
+        maxOutput.value = formatPauseDuration(maxMs);
+        maxOutput.textContent = maxOutput.value;
+      }
+    };
 
     function formatMegabytes(bytes) {
       const value = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
@@ -556,6 +625,11 @@
       el('#vision-key-state').textContent = config.api.visionApiKeySet ? '视觉 API Key 已保存（为安全起见不回显）' : '视觉 API Key 尚未保存';
       el('#automation-enabled').checked = config.automation.enabled;
       el('#automation-auto-execute').checked = config.automation.autoExecute === true;
+      el('#rest-mode').checked = config.automation.restMode === true;
+      const restOffset = Math.round(Number(config.automation.restOffsetPx) || 0);
+      el('#rest-offset').value = restOffset;
+      el('#rest-offset-output').value = restOffset === 0 ? '贴底' : `${restOffset} px`;
+      el('#rest-offset-output').textContent = el('#rest-offset-output').value;
       el('#wellbeing-enabled').checked = config.automation.wellbeingEnabled !== false;
       const wellbeingInterval = Math.round((Number(config.automation.wellbeingMinIntervalMs) || 45 * 60 * 1000) / 60000);
       const wellbeingThreshold = Math.round((Number(config.automation.wellbeingLongUseThresholdMs) || 90 * 60 * 1000) / 60000);
@@ -567,6 +641,11 @@
       el('#wellbeing-threshold-output').textContent = el('#wellbeing-threshold-output').value;
       el('#wechat-auto-reply').checked = config.automation.wechatAutoReply === true;
       el('#wechat-interval').value = Math.round((Number(config.automation.wechatIntervalMs) || 5000) / 1000);
+      const pauseMin = movementPauseToSlider(Number(config.automation.movementPauseMinMs) || 30000);
+      const pauseMax = movementPauseToSlider(Number(config.automation.movementPauseMaxMs) || 90000);
+      el('#movement-pause-min').value = pauseMin;
+      el('#movement-pause-max').value = Math.max(pauseMin, pauseMax);
+      updateMovementPauseLabels();
       const perchOffset = Math.round(Number(config.automation.perchOffsetPx) || 0);
       el('#perch-offset').value = perchOffset;
       el('#perch-offset-output').value = `${perchOffset} px`;
@@ -581,6 +660,7 @@
       renderMedia(el('#standing-preview-image'), el('#standing-preview-video'), el('#standing-preview-empty'), config.pet.standing);
       renderMedia(el('#interaction-preview-image'), el('#interaction-preview-video'), el('#interaction-preview-empty'), config.pet.interaction);
       renderMedia(el('#moving-preview-image'), el('#moving-preview-video'), el('#moving-preview-empty'), config.pet.moving);
+      renderMedia(el('#rest-preview-image'), el('#rest-preview-video'), el('#rest-preview-empty'), config.pet.rest);
       renderMedia(el('#delete-preview-image'), el('#delete-preview-video'), el('#delete-preview-empty'), config.pet.deleteAnimation);
       const scaleValues = {
         master: Number(config.pet.masterScale ?? config.pet.scale ?? 1),
@@ -588,6 +668,7 @@
         standing: Number(config.pet.standingScale ?? 1),
         interaction: Number(config.pet.interactionScale ?? 1),
         moving: Number(config.pet.movingScale ?? 1),
+        rest: Number(config.pet.restScale ?? 1),
         delete: Number(config.pet.deleteScale ?? 1)
       };
       for (const [key, value] of Object.entries(scaleValues)) {
@@ -808,8 +889,9 @@
     el('#choose-standing-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('standing')));
     el('#choose-interaction-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('interaction')));
     el('#choose-moving-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('moving')));
+    el('#choose-rest-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('rest')));
     el('#choose-delete-pet').addEventListener('click', async () => applyConfig(await api.choosePetMedia('delete')));
-    for (const key of ['master', 'idle', 'standing', 'interaction', 'moving', 'delete']) {
+    for (const key of ['master', 'idle', 'standing', 'interaction', 'moving', 'rest', 'delete']) {
       const input = el(`#pet-scale-${key}`);
       const output = el(`#pet-scale-${key}-output`);
       input?.addEventListener('input', (event) => {
@@ -832,6 +914,133 @@
     });
     el('#automation-auto-execute').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { autoExecute: event.target.checked } }));
+    });
+    el('#rest-mode').addEventListener('change', async (event) => {
+      applyConfig(await api.saveConfig({ automation: { restMode: event.target.checked } }));
+    });
+    el('#rest-offset').addEventListener('input', (event) => {
+      const value = Math.max(0, Math.min(200, Number(event.target.value) || 0));
+      el('#rest-offset-output').value = value === 0 ? '贴底' : `${value} px`;
+      el('#rest-offset-output').textContent = el('#rest-offset-output').value;
+    });
+    el('#rest-offset').addEventListener('change', async (event) => {
+      const value = Math.max(0, Math.min(200, Number(event.target.value) || 0));
+      event.target.value = value;
+      applyConfig(await api.saveConfig({ automation: { restOffsetPx: value } }));
+    });
+    const saveMovementPauseRange = async () => {
+      const minInput = el('#movement-pause-min');
+      const maxInput = el('#movement-pause-max');
+      let minSlider = Math.min(100, Math.max(0, Number(minInput.value) || 0));
+      let maxSlider = Math.min(100, Math.max(0, Number(maxInput.value) || 0));
+      minSlider = Math.min(100 - MOVEMENT_SLIDER_MIN_GAP, minSlider);
+      maxSlider = Math.max(MOVEMENT_SLIDER_MIN_GAP, maxSlider);
+      if (maxSlider - minSlider < MOVEMENT_SLIDER_MIN_GAP) maxSlider = Math.min(100, minSlider + MOVEMENT_SLIDER_MIN_GAP);
+      if (maxSlider - minSlider < MOVEMENT_SLIDER_MIN_GAP) minSlider = Math.max(0, maxSlider - MOVEMENT_SLIDER_MIN_GAP);
+      minInput.value = minSlider;
+      maxInput.value = maxSlider;
+      updateMovementPauseLabels();
+      if (movementPauseStatus) movementPauseStatus.textContent = `正在保存：${formatPauseDuration(movementPauseFromSlider(minSlider))} – ${formatPauseDuration(movementPauseFromSlider(maxSlider))}`;
+      try {
+        applyConfig(await api.saveConfig({ automation: {
+          movementPauseMinMs: movementPauseFromSlider(minSlider),
+          movementPauseMaxMs: movementPauseFromSlider(maxSlider)
+        } }));
+        if (movementPauseStatus) movementPauseStatus.textContent = '已保存，下一次自然移动将使用新的静止时间范围。';
+      } catch (error) {
+        if (movementPauseStatus) movementPauseStatus.textContent = `保存失败：${error.message}`;
+      }
+    };
+    const movementRange = el('#movement-pause-range');
+    const movementHandles = {
+      min: el('#movement-pause-min-handle'),
+      max: el('#movement-pause-max-handle')
+    };
+    const setMovementSlider = (handleName, value) => {
+      const minInput = el('#movement-pause-min');
+      const maxInput = el('#movement-pause-max');
+      let next = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+      const minValue = Math.min(100 - MOVEMENT_SLIDER_MIN_GAP, Math.max(0, Number(minInput.value) || 0));
+      const maxValue = Math.min(100, Math.max(MOVEMENT_SLIDER_MIN_GAP, Number(maxInput.value) || 0));
+      if (handleName === 'min') next = Math.min(next, maxValue - MOVEMENT_SLIDER_MIN_GAP);
+      else next = Math.max(next, minValue + MOVEMENT_SLIDER_MIN_GAP);
+      (handleName === 'min' ? minInput : maxInput).value = next;
+      updateMovementPauseLabels();
+    };
+    const movementSliderFromPointer = (event) => {
+      const rect = movementRange.getBoundingClientRect();
+      if (!rect.width) return 0;
+      return Math.min(100, Math.max(0, ((event.clientX - rect.left) / rect.width) * 100));
+    };
+    let movementDrag;
+    const beginMovementHandleDrag = (handleName, event) => {
+      const handle = movementHandles[handleName];
+      if (!handle || movementDrag || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 1;
+      const drag = { handle, pointerId, finished: false };
+      movementDrag = drag;
+      if (movementPauseStatus) movementPauseStatus.textContent = '正在调整…';
+      const move = (moveEvent) => {
+        if (Number.isFinite(moveEvent.pointerId) && moveEvent.pointerId !== pointerId) return;
+        moveEvent.preventDefault();
+        setMovementSlider(handleName, movementSliderFromPointer(moveEvent));
+      };
+      const end = (endEvent = {}) => {
+        if (drag.finished) return;
+        if (Number.isFinite(endEvent.pointerId) && endEvent.pointerId !== pointerId) return;
+        drag.finished = true;
+        try { handle.releasePointerCapture?.(pointerId); } catch { /* capture may already be released. */ }
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        window.removeEventListener('blur', end);
+        document.removeEventListener('mouseup', end);
+        movementDrag = undefined;
+        void saveMovementPauseRange();
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+      window.addEventListener('blur', end);
+      document.addEventListener('mouseup', end);
+      try { handle.setPointerCapture?.(pointerId); } catch { /* pointer capture is optional on older Electron builds. */ }
+    };
+    Object.entries(movementHandles).forEach(([handleName, handle]) => {
+      handle?.addEventListener('pointerdown', (event) => beginMovementHandleDrag(handleName, event));
+      handle?.addEventListener('keydown', async (event) => {
+        const current = Number(el(`#movement-pause-${handleName}`).value) || 0;
+        const step = event.shiftKey ? 10 : 1;
+        let next = current;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next -= step;
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next += step;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = 100;
+        else return;
+        event.preventDefault();
+        setMovementSlider(handleName, next);
+        await saveMovementPauseRange();
+      });
+    });
+    movementRange?.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || movementDrag) return;
+      if (event.target.closest('.dual-range-thumb')) return;
+      event.preventDefault();
+      const target = movementSliderFromPointer(event);
+      const minValue = Number(el('#movement-pause-min').value) || 0;
+      const maxValue = Number(el('#movement-pause-max').value) || 0;
+      const handleName = Math.abs(target - minValue) <= Math.abs(target - maxValue) ? 'min' : 'max';
+      setMovementSlider(handleName, target);
+      movementHandles[handleName]?.focus();
+      if (movementPauseStatus) movementPauseStatus.textContent = '正在保存…';
+      void saveMovementPauseRange();
     });
     el('#wellbeing-enabled').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { wellbeingEnabled: event.target.checked } }));

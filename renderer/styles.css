@@ -21,6 +21,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .pet-app { height: 100vh; width: 100vw; background: transparent; overflow: hidden; }
 .pet-shell { width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+.pet-shell.resting { place-items: end center; }
 .pet-shell.dragging { cursor: grabbing; }
 .pet-media {
   display: block;
@@ -152,6 +153,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .pet-scale-settings { display: grid; gap: 3px; padding-top: 4px; border-top: 1px solid var(--line); }
 .pet-scale-settings .range-label { margin-top: 8px; }
 .pet-scale-master-label { padding-bottom: 4px; }
+.rest-media-setting { padding-top: 5px; border-top: 1px solid var(--line); }
+.rest-mode-toggle { display: inline-flex !important; grid-template-columns: none !important; align-items: center; gap: 8px !important; margin-top: 1px; }
+.rest-mode-toggle input { width: auto !important; accent-color: var(--accent); }
 .form-card { padding: 21px; display: grid; align-content: start; gap: 18px; }
 .form-card label { display: grid; gap: 7px; color: #c8cce3; font-size: 12px; font-weight: 650; }
 .form-card input, .form-card textarea { width: 100%; border: 1px solid var(--line); outline: none; border-radius: 8px; padding: 10px 11px; color: var(--ink); background: #141827; line-height: 1.45; font-size: 13px; transition: border .15s ease; }
@@ -165,6 +169,27 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .range-label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 7px; margin-top: 14px; color: #c8cce3; font-size: 12px; }
 .range-label input { grid-column: 1 / -1; width: 100%; accent-color: #a794ff; }
 .range-label output { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.movement-frequency-card { display: grid; gap: 12px; }
+.movement-frequency-card > div:first-child p { margin-bottom: 0; }
+.dual-range { position: relative; height: 30px; margin: 2px 8px 0; touch-action: none; user-select: none; cursor: pointer; }
+.dual-range-track, .dual-range-fill { position: absolute; left: 0; right: 0; top: 15px; height: 4px; border-radius: 99px; pointer-events: none; }
+.dual-range-track { background: rgba(151, 133, 255, .2); }
+.dual-range-fill { left: var(--range-start, 26%); right: calc(100% - var(--range-end, 52%)); background: linear-gradient(90deg, var(--accent), var(--accent-bright)); opacity: .82; }
+.dual-range-thumb { appearance: none; position: absolute; top: 9px; left: var(--thumb-position, 0%); width: 16px; height: 16px; min-width: 16px; min-height: 16px; padding: 0; transform: translateX(-50%); border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent-bright), 0 2px 6px rgba(0, 0, 0, .22); cursor: grab; touch-action: none; }
+.dual-range-thumb:hover, .dual-range-thumb:focus-visible { background: var(--accent-bright); outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
+.dual-range-thumb:active { cursor: grabbing; }
+.dual-range-thumb[data-handle="min"] { z-index: 2; }
+.dual-range-thumb[data-handle="max"] { z-index: 3; }
+.dual-range input { display: none; }
+.dual-range-ticks { position: relative; height: 17px; margin: -1px 8px 0; color: #8992b0; font-size: 10px; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
+.dual-range-ticks::before { content: ''; position: absolute; top: -7px; left: 0; right: 0; height: 5px; background: repeating-linear-gradient(90deg, rgba(194, 183, 255, .42) 0 1px, transparent 1px 25%); opacity: .7; }
+.dual-range-ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.dual-range-ticks span:first-child { transform: none; }
+.dual-range-ticks span:last-child { transform: translateX(-100%); }
+.dual-range-labels { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.dual-range-labels span { display: inline-flex; gap: 5px; align-items: baseline; }
+.dual-range-labels output { color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.movement-pause-status { margin-top: -4px; }
 
 .connection-card { max-width: 620px; grid-template-columns: 1fr 1fr; }
 .connection-card .wide-field, .connection-card .range-label { grid-column: 1 / -1; }

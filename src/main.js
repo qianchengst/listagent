@@ -48,10 +48,8 @@ const PET_HEIGHT = 260;
 const AUTO_MOVE_PIXELS_PER_SECOND = 300;
 const PERCH_SNAP_DISTANCE_DIP = 86;
 const PERCH_SNAP_MIN_OVERLAP_DIP = 44;
-const FREE_MOVE_DELAY_MIN_MS = 3500;
-const FREE_MOVE_DELAY_RANGE_MS = 5500;
-const PERCHED_MOVE_DELAY_MIN_MS = 16000;
-const PERCHED_MOVE_DELAY_RANGE_MS = 14000;
+const MOVE_PAUSE_MIN_MS = 10 * 1000;
+const MOVE_PAUSE_MAX_MS = 10 * 60 * 1000;
 let petWindow;
 let consoleWindow;
 let bubbleWindow;
@@ -100,6 +98,7 @@ let lastWechatDebug = {
 let deleteRequestBusy = false;
 let deleteRequestPath = '';
 let petWindowScale = 1;
+let restModeActive = false;
 
 function deleteTargetFromArgv(argv = process.argv) {
   const values = Array.isArray(argv) ? argv.map((value) => String(value ?? '')) : [];
@@ -153,7 +152,9 @@ function deleteAnimationAsset() {
       ? pet.moving
       : pet.idle?.url
         ? pet.idle
-        : pet.standing;
+        : pet.standing?.url
+          ? pet.standing
+          : pet.rest;
 }
 
 function petDimensions(scale = petWindowScale) {
@@ -177,6 +178,7 @@ function resizePetWindow(scale, preserveCenter = true) {
   if (preserveCenter) {
     positionPet(center.x - next.width / 2, center.y - next.height / 2);
   }
+  if (restModeActive && !perchedOnWindow && !userDragging) positionPetAtRestCorner();
 }
 
 async function explorerFileBounds(filePath) {
@@ -541,7 +543,49 @@ function rendererPath(file) {
 
 function hasIdlePetAsset() {
   const pet = toPublicSettings(readSettings()).pet;
-  return Boolean(pet.idle?.url || pet.standing?.url);
+  return Boolean(pet.idle?.url || pet.standing?.url || (restModeActive && pet.rest?.url));
+}
+
+function movementPauseRange(settings = readSettings()) {
+  const automation = settings?.automation || {};
+  const min = Math.min(MOVE_PAUSE_MAX_MS, Math.max(MOVE_PAUSE_MIN_MS, Math.round(Number(automation.movementPauseMinMs) || 30 * 1000)));
+  const max = Math.min(MOVE_PAUSE_MAX_MS, Math.max(MOVE_PAUSE_MIN_MS, Math.round(Number(automation.movementPauseMaxMs) || 90 * 1000)));
+  return min <= max ? { min, max } : { min: max, max: min };
+}
+
+function restOffsetPx(settings = readSettings()) {
+  return Math.min(200, Math.max(0, Math.round(Number(settings?.automation?.restOffsetPx) || 0)));
+}
+
+function positionPetAtRestCorner() {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const bounds = petWindow.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const area = display.workArea;
+  const offset = restOffsetPx();
+  const x = Math.round(area.x + area.width - bounds.width - 12);
+  const y = Math.round(area.y + area.height - bounds.height - offset);
+  petWindow.setPosition(
+    Math.max(area.x, Math.min(x, area.x + area.width - bounds.width)),
+    Math.max(area.y, Math.min(y, area.y + area.height - bounds.height))
+  );
+}
+
+function syncRestMode(config, { forcePosition = false } = {}) {
+  const enabled = config?.automation?.restMode === true;
+  const changed = enabled !== restModeActive;
+  restModeActive = enabled;
+  if (enabled) {
+    stopAutoMove();
+    perchedOnWindow = false;
+    perchedWindowInfo = undefined;
+    if (changed || forcePosition) {
+      positionPetAtRestCorner();
+      emitMovementState(false, { perched: false });
+    }
+  } else if (changed) {
+    scheduleRandomMove();
+  }
 }
 
 function emitMovementState(isMoving, metadata = {}) {
@@ -559,6 +603,7 @@ function canAutoMove() {
     !petWindow.isDestroyed() &&
     hasIdlePetAsset() &&
     !userDragging &&
+    !restModeActive &&
     !autoMoving &&
     taskDepth === 0 &&
     (!consoleWindow || !consoleWindow.isVisible()) &&
@@ -580,9 +625,8 @@ function scheduleRandomMove() {
   if (randomMoveTimer) clearTimeout(randomMoveTimer);
   randomMoveTimer = undefined;
   if (!canAutoMove()) return;
-  const delayMs = perchedOnWindow
-    ? PERCHED_MOVE_DELAY_MIN_MS + Math.floor(Math.random() * PERCHED_MOVE_DELAY_RANGE_MS)
-    : FREE_MOVE_DELAY_MIN_MS + Math.floor(Math.random() * FREE_MOVE_DELAY_RANGE_MS);
+  const { min, max } = movementPauseRange();
+  const delayMs = min + Math.floor(Math.random() * Math.max(0, max - min));
   randomMoveTimer = setTimeout(() => {
     randomMoveTimer = undefined;
     void startRandomMove();
@@ -755,6 +799,7 @@ function createPetWindow() {
   petWindow.loadFile(rendererPath('index.html'), { query: { view: 'pet' } });
   petWindow.webContents.once('did-finish-load', () => {
     lockPetViewport();
+    if (restModeActive) positionPetAtRestCorner();
     scheduleRandomMove();
   });
   petWindow.webContents.on('zoom-changed', lockPetViewport);
@@ -1056,7 +1101,7 @@ function openConsole() {
   sendChatHistory(consoleWindow);
 }
 
-function broadcastConfig() {
+function broadcastConfig(patch = {}) {
   const config = toPublicSettings(readSettings());
   invalidateGreetingCache();
   for (const window of [petWindow, consoleWindow, bubbleWindow]) {
@@ -1065,6 +1110,12 @@ function broadcastConfig() {
   warmGreetingCache();
   syncWechatMonitor(config);
   syncWellbeingMonitor(config);
+  syncRestMode(config, {
+    forcePosition: Boolean(patch?.automation && (
+      Object.prototype.hasOwnProperty.call(patch.automation, 'restOffsetPx')
+      || Object.prototype.hasOwnProperty.call(patch.automation, 'restMode')
+    ))
+  });
   scheduleRandomMove();
   return config;
 }
@@ -1228,7 +1279,7 @@ function registerIpc() {
   ipcMain.handle('config:get', () => toPublicSettings(readSettings()));
   ipcMain.handle('config:save', (_event, patch) => {
     saveSettings(patch);
-    const config = broadcastConfig();
+    const config = broadcastConfig(patch);
     if (patch?.automation && Object.prototype.hasOwnProperty.call(patch.automation, 'perchOffsetPx')) {
       repositionPerchedPet();
     }
@@ -1237,13 +1288,15 @@ function registerIpc() {
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => installAvailableUpdate());
   ipcMain.handle('pet:choose-media', async (_event, state) => {
-    const targetState = ['idle', 'standing', 'interaction', 'moving', 'delete'].includes(state) ? state : 'idle';
+    const targetState = ['idle', 'standing', 'interaction', 'moving', 'rest', 'delete'].includes(state) ? state : 'idle';
     const title = targetState === 'moving'
       ? '选择移动时桌宠动图'
       : targetState === 'standing'
         ? '选择站立时桌宠动图'
         : targetState === 'interaction'
           ? '选择互动时桌宠动图'
+          : targetState === 'rest'
+            ? '选择休息时桌宠动图'
           : targetState === 'delete'
             ? '选择文件删除时播放的动图'
             : '选择坐立时桌宠动图';
@@ -1355,6 +1408,7 @@ app.whenReady().then(() => {
   registerWindowsContextMenu().catch((error) => {
     console.error(`注册资源管理器右键菜单失败：${error.message}`);
   });
+  restModeActive = readSettings().automation.restMode === true;
   // Start both greeting requests before either chat surface is opened. The
   // renderer then consumes the shared in-flight request or its cached result.
   warmGreetingCache();

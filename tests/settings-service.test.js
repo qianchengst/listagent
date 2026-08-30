@@ -42,6 +42,12 @@ test('text and vision connections remain independent', () => {
   assert.equal('visionApiKey' in publicSettings.api, false);
 });
 
+test('update repository defaults to the official project when missing or blank', () => {
+  assert.equal(toPublicSettings({}).update.repository, 'qianchengst/listagent');
+  assert.equal(toPublicSettings({ update: { repository: '' } }).update.repository, 'qianchengst/listagent');
+  assert.equal(toPublicSettings({ update: { repository: '  custom-owner/custom-repo  ' } }).update.repository, 'custom-owner/custom-repo');
+});
+
 test('persona relationship is preserved and has a useful default', () => {
   const defaultSettings = toPublicSettings({ persona: {} });
   assert.equal(defaultSettings.persona.relationship, '值得信任的搭档');
@@ -71,6 +77,24 @@ test('pet scales expose independent 20%–200% values and a shared master scale'
   assert.equal(pet.interactionScale, 0.2);
   assert.equal(pet.movingScale, 2);
   assert.equal(pet.deleteScale, 0.75);
+});
+
+test('rest state and movement pause range expose safe defaults and bounds', () => {
+  const defaults = toPublicSettings({}).automation;
+  assert.equal(defaults.restMode, false);
+  assert.equal(defaults.restOffsetPx, 0);
+  assert.equal(defaults.movementPauseMinMs, 30 * 1000);
+  assert.equal(defaults.movementPauseMaxMs, 90 * 1000);
+  const bounded = toPublicSettings({
+    pet: { restScale: 3 },
+    automation: { restMode: true, restOffsetPx: 999, movementPauseMinMs: 1, movementPauseMaxMs: 999999999 }
+  });
+  assert.equal(bounded.pet.restScale, 2);
+  assert.equal(bounded.automation.restMode, true);
+  assert.equal(bounded.automation.restOffsetPx, 200);
+  assert.equal(bounded.automation.movementPauseMinMs, 10 * 1000);
+  assert.equal(bounded.automation.movementPauseMaxMs, 10 * 60 * 1000);
+  assert.equal('rest' in bounded.pet, true);
 });
 
 test('perch offset is bounded to a safe vertical range', () => {
