@@ -1,0 +1,44 @@
+name: Publish Mirror酱 release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag to mirror
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirrorchyan:
+    # Mirror酱必须先为本项目开通资源并分配 RID。没有配置时安全跳过，
+    # 不会影响 GitHub Release 的发布。
+    if: ${{ vars.MIRRORCHYAN_ENABLED == 'true' && vars.MIRRORCHYAN_RID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload Windows portable package to Mirror酱
+        uses: MirrorChyan/uploading-action@v1
+        with:
+          filetype: latest-release
+          filename: listagent-windows-x64.zip
+          mirrorchyan_rid: ${{ vars.MIRRORCHYAN_RID }}
+          tag: ${{ steps.meta.outputs.tag }}
+          os: win
+          arch: x64
+          owner: qianchengst
+          repo: listagent
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          upload_token: ${{ secrets.MirrorChyanUploadToken }}

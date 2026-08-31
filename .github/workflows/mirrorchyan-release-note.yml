@@ -1,0 +1,38 @@
+name: Sync Mirror酱 release notes
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirrorchyan:
+    if: ${{ vars.MIRRORCHYAN_ENABLED == 'true' && vars.MIRRORCHYAN_RID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Sync release note to Mirror酱
+        uses: MirrorChyan/release-note-action@v1
+        with:
+          mirrorchyan_rid: ${{ vars.MIRRORCHYAN_RID }}
+          version_name: ${{ steps.meta.outputs.tag }}
+          owner: qianchengst
+          repo: listagent
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          upload_token: ${{ secrets.MirrorChyanUploadToken }}

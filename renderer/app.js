@@ -1110,6 +1110,15 @@
       el('#temperature').value = config.api.temperature;
       el('#temperature-output').value = config.api.temperature;
       el('#update-repository').value = config.update?.repository || '';
+      const updateSource = config.update?.source === 'mirror' ? 'mirror' : 'github';
+      document.querySelectorAll('input[name="update-source"]').forEach((input) => {
+        input.checked = input.value === updateSource;
+      });
+      el('#mirror-resource-id').value = config.update?.mirrorResourceId || '';
+      el('#mirror-cdk').value = '';
+      el('#mirror-cdk-state').textContent = config.update?.mirrorCdkSet
+        ? 'Mirror酱 CDK 已保存（为安全起见不回显）'
+        : 'Mirror酱 CDK 尚未保存';
       el('#text-key-state').textContent = config.api.textApiKeySet ? '文本 API Key 已保存（为安全起见不回显）' : '文本 API Key 尚未保存';
       el('#vision-key-state').textContent = config.api.visionApiKeySet ? '视觉 API Key 已保存（为安全起见不回显）' : '视觉 API Key 尚未保存';
       el('#automation-enabled').checked = config.automation.enabled;
@@ -1375,10 +1384,16 @@
           visionApiKey: el('#api-vision-key').value,
           temperature: Number(el('#temperature').value)
         },
-        update: { repository: el('#update-repository').value }
+        update: {
+          repository: el('#update-repository').value,
+          source: document.querySelector('input[name="update-source"]:checked')?.value || 'github',
+          mirrorResourceId: el('#mirror-resource-id').value,
+          mirrorCdk: el('#mirror-cdk').value
+        }
       });
       el('#api-text-key').value = '';
       el('#api-vision-key').value = '';
+      el('#mirror-cdk').value = '';
       applyConfig(next);
     }
 
@@ -1442,16 +1457,18 @@
         updateProgress.textContent = '';
         updateProgress.dataset.state = '';
       }
-      status.textContent = '正在检查 GitHub 更新…';
+      const selectedSource = document.querySelector('input[name="update-source"]:checked')?.value || 'github';
+      const sourceLabel = selectedSource === 'mirror' ? 'Mirror酱' : 'GitHub';
+      status.textContent = `正在检查 ${sourceLabel} 更新…`;
       try {
         const result = await api.checkForUpdates();
         if (!result.configured) {
-          status.textContent = '请先填写 GitHub 更新仓库，例如 your-name/listagent。';
+          status.textContent = '请先填写更新仓库，例如 your-name/listagent。';
         } else if (!result.updateAvailable) {
-          status.textContent = `当前已是最新版本 v${result.currentVersion}。`;
+          status.textContent = `当前已是最新版本 v${result.currentVersion}（${result.source === 'mirror' ? 'Mirror酱' : 'GitHub'}）。`;
         } else {
-          const modeHint = result.mode === 'delta' ? '安装时只下载变化的程序文件' : '该 Release 没有增量清单，将下载完整包';
-          status.textContent = `发现新版本 v${result.latestVersion}，${modeHint}。点击“立即更新”。`;
+          const modeHint = result.mode === 'delta' ? '安装时只下载变化的程序文件' : result.source === 'mirror' ? '将从 Mirror酱下载完整便携包' : '该 Release 没有增量清单，将下载完整包';
+          status.textContent = `发现新版本 v${result.latestVersion}（${result.source === 'mirror' ? 'Mirror酱' : 'GitHub'}），${modeHint}。点击“立即更新”。`;
           install.hidden = false;
         }
       } catch (error) {
@@ -1462,7 +1479,10 @@
       const status = el('#update-status');
       const button = el('#install-update');
       button.disabled = true;
-      status.textContent = '正在获取更新清单并下载变化文件，完成后会自动重启…';
+      const selectedSource = document.querySelector('input[name="update-source"]:checked')?.value || 'github';
+      status.textContent = selectedSource === 'mirror'
+        ? '正在从 Mirror酱下载更新，完成后会自动重启…'
+        : '正在获取更新清单并下载变化文件，完成后会自动重启…';
       renderUpdateProgress({ phase: 'starting', downloaded: 0, total: 0 });
       try {
         await api.installUpdate();
