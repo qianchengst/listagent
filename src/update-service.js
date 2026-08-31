@@ -8,7 +8,6 @@ const UPDATE_DIR = path.join(PROJECT_ROOT, '.runtime', 'updates');
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 const MANIFEST_NAME = 'listagent-update-manifest.json';
-const MIRROR_API_BASE = 'https://mirrorchyan.com/api/resources';
 // Clients before v0.2.9 predate the delta-update protocol and must always use
 // the portable archive, even when a newer Release also contains a manifest.
 const MIN_DELTA_CLIENT_VERSION = '0.2.9';
@@ -57,22 +56,6 @@ function isGithubUrl(value) {
     const url = new URL(String(value));
     return url.protocol === 'https:' && url.hostname.toLowerCase() === 'github.com';
   } catch { return false; }
-}
-
-function isMirrorUrl(value) {
-  try {
-    const url = new URL(String(value));
-    return url.protocol === 'https:' && (url.hostname.toLowerCase() === 'mirrorchyan.com'
-      || url.hostname.toLowerCase().endsWith('.mirrorchyan.com'));
-  } catch { return false; }
-}
-
-function updateSource(settings = {}) {
-  return settings.update?.source === 'mirror' ? 'mirror' : 'github';
-}
-
-function mirrorResourceId(settings = {}) {
-  return String(settings.update?.mirrorResourceId || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 120);
 }
 
 function isAllowedRawUrl(value, repository) {
@@ -170,7 +153,6 @@ async function getReleaseFromPublicPage(repository, version) {
   const tag = tagMatch ? decodeURIComponent(tagMatch[1]) : `v${latestVersion}`;
   return {
     configured: true, repository, currentVersion: version, latestVersion,
-    source: 'github',
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: latestVersion,
     releaseUrl: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
@@ -180,66 +162,9 @@ async function getReleaseFromPublicPage(repository, version) {
   };
 }
 
-async function getMirrorUpdateInfo(settings, repository, version) {
-  const resourceId = mirrorResourceId(settings);
-  if (!resourceId) {
-    throw new Error('未填写 Mirror酱资源 ID。请先联系 Mirror酱获取资源 ID，或切换到国外源（GitHub）。');
-  }
-  const query = new URLSearchParams({
-    current_version: `v${version}`,
-    user_agent: 'listagent',
-    os: 'win',
-    arch: 'x64',
-    channel: 'stable'
-  });
-  const cdk = String(settings.update?.mirrorCdk || '').trim();
-  if (cdk) query.set('cdk', cdk);
-  const response = await fetch(`${MIRROR_API_BASE}/${encodeURIComponent(resourceId)}/latest?${query.toString()}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'listagent-update-checker' }
-  });
-  if (!response.ok) throw new Error(`Mirror酱更新检查失败（HTTP ${response.status}）。`);
-  let payload;
-  try { payload = await response.json(); } catch { throw new Error('Mirror酱返回的数据不是有效 JSON。'); }
-  if (Number(payload?.code) !== 0) {
-    throw new Error(`Mirror酱更新检查失败：${String(payload?.msg || `错误码 ${payload?.code ?? 'unknown'}`)}。`);
-  }
-  const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
-  const latestVersion = String(data.version_name || data.version_number || '').replace(/^v/i, '') || version;
-  const updateAvailable = compareVersions(latestVersion, version) > 0;
-  const downloadUrl = String(data.url || '').trim();
-  const digestValue = String(data.sha256 || data.digest || '').trim();
-  const digest = digestValue && /^sha256:/i.test(digestValue) ? digestValue : (digestValue ? `sha256:${digestValue}` : '');
-  const hasDownload = updateAvailable && Boolean(downloadUrl);
-  return {
-    configured: true,
-    source: 'mirror',
-    repository,
-    mirrorResourceId: resourceId,
-    currentVersion: version,
-    latestVersion,
-    updateAvailable,
-    releaseName: latestVersion,
-    releaseUrl: `https://mirrorchyan.com/zh/projects?rid=${encodeURIComponent(resourceId)}&source=listagent_update`,
-    publishedAt: '',
-    notes: String(data.release_note || data.release_notes || '').slice(0, 4000),
-    // Mirror酱's public API exposes one signed download URL. It is treated as
-    // the complete portable archive; GitHub remains the incremental source.
-    mode: hasDownload ? 'full' : 'mirror',
-    manifestAsset: null,
-    asset: hasDownload ? {
-      name: String(data.filename || data.file_name || 'listagent-windows-x64.zip'),
-      size: Number(data.filesize || data.file_size || data.size) || 0,
-      downloadUrl,
-      digest
-    } : null,
-    mirrorDownloadAvailable: hasDownload
-  };
-}
-
 async function getUpdateInfo(settings = {}) {
   const repository = configuredRepository(settings); const version = currentVersion();
   if (!repository) return { configured: false, repository: '', currentVersion: version, updateAvailable: false };
-  if (updateSource(settings) === 'mirror') return getMirrorUpdateInfo(settings, repository, version);
   const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'listagent-update-checker' }
   });
@@ -252,7 +177,7 @@ async function getUpdateInfo(settings = {}) {
   const manifestAsset = selectManifestAsset(release.assets); const asset = selectAsset(release.assets);
   const mode = manifestAsset && compareVersions(version, MIN_DELTA_CLIENT_VERSION) >= 0 ? 'delta' : 'full';
   return {
-    configured: true, source: 'github', repository, currentVersion: version, latestVersion,
+    configured: true, repository, currentVersion: version, latestVersion,
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: release.name || release.tag_name || latestVersion,
     releaseUrl: release.html_url || `https://github.com/${repository}/releases`,
@@ -326,8 +251,7 @@ async function downloadDeltaUpdate(updateInfo, manifest, onProgress) {
 
 async function downloadFullArchive(updateInfo, onProgress) {
   const asset = updateInfo?.asset;
-  const allowedUrl = isGithubUrl(asset?.downloadUrl) || isMirrorUrl(asset?.downloadUrl);
-  if (!asset?.downloadUrl || !allowedUrl) throw new Error('此版本没有可下载的 Windows 更新包。');
+  if (!asset?.downloadUrl || !isGithubUrl(asset.downloadUrl)) throw new Error('此版本没有可下载的 Windows 更新包。');
   if (asset.size > MAX_DOWNLOAD_BYTES) throw new Error('更新包超过允许的大小限制。');
   fs.mkdirSync(UPDATE_DIR, { recursive: true });
   const filename = `listagent-${updateInfo.latestVersion || Date.now()}.zip`.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -347,12 +271,6 @@ async function downloadFullArchive(updateInfo, onProgress) {
 }
 
 async function downloadUpdate(updateInfo, onProgress) {
-  if (updateInfo?.source === 'mirror') {
-    if (!updateInfo.mirrorDownloadAvailable || !updateInfo.asset?.downloadUrl) {
-      throw new Error('Mirror酱没有返回可下载地址，请填写有效 CDK，或切换到国外源（GitHub）。');
-    }
-    return downloadFullArchive(updateInfo, onProgress);
-  }
   const supportsDelta = compareVersions(currentVersion(), MIN_DELTA_CLIENT_VERSION) >= 0;
   const manifest = supportsDelta ? await downloadManifest(updateInfo, onProgress) : null;
   if (manifest?.repository && normalizeRepository(manifest.repository) !== normalizeRepository(updateInfo?.repository)) throw new Error('更新清单与当前仓库不匹配。');
@@ -363,4 +281,4 @@ async function downloadUpdate(updateInfo, onProgress) {
   return downloadFullArchive(updateInfo, onProgress);
 }
 
-module.exports = { configuredRepository, compareVersions, currentVersion, safeRelativePath, createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION, isMirrorUrl };
+module.exports = { configuredRepository, compareVersions, currentVersion, safeRelativePath, createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION };

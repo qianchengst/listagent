@@ -69,7 +69,3 @@ npm start
 ## GitHub 更新
 
 在控制面板“连接”页面填写公开仓库的 `owner/repository`，即可检查 GitHub Releases 并一键更新；新安装和历史空白配置会自动填入 `qianchengst/listagent`。点击更新后，按钮右侧会显示累计下载量（已下载 MB / 总计 MB）。`v0.2.9` 是兼容过渡版本，仅发布完整便携包；从 `v0.2.10` 起每个 Release 同时发布完整包和 `listagent-update-manifest.json` 增量清单。`0.2.9` 之前的客户端始终识别并下载完整包，`0.2.9` 及之后的客户端优先使用增量清单，缺少清单或 Electron 运行时变化时才回退完整包。更新会保留每位使用者的 `data`、`.runtime`、模型和本地素材。发布新版本时推送形如 `v0.2.1` 的标签，GitHub Actions 会按版本策略自动构建并发布相应资产。
-
-### Mirror酱国内源
-
-在“连接”页面可将更新来源切换为“国内源（Mirror酱）”。需要先联系 Mirror酱为项目开通资源并取得资源 ID；若该资源要求下载授权，还需填写 CDK。Mirror酱 API 返回带时效的下载地址后，客户端会下载完整 Windows 便携包；没有可用地址时请切换回 GitHub。仓库中的 `.github/workflows/mirrorchyan-release.yml` 会在 GitHub Release 发布后自动上传 `listagent-windows-x64.zip`，但必须先在仓库配置变量 `MIRRORCHYAN_ENABLED=true`、`MIRRORCHYAN_RID` 和密钥 `MirrorChyanUploadToken`。源代码仍以 GitHub 为准，Mirror酱用于分发发布包。

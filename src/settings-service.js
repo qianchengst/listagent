@@ -52,12 +52,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     skin: 'classic'
   },
   update: {
-    repository: DEFAULT_UPDATE_REPOSITORY,
-    // GitHub is the default/overseas source. Mirror酱 is opt-in because it
-    // requires a resource ID assigned by Mirror酱 and (for downloads) a CDK.
-    source: 'github',
-    mirrorResourceId: '',
-    mirrorCdk: ''
+    repository: DEFAULT_UPDATE_REPOSITORY
   },
   automation: {
     enabled: false,
@@ -97,9 +92,6 @@ function mergeSettings(saved = {}) {
   } else {
     result.update.repository = String(result.update.repository).trim().slice(0, 200);
   }
-  result.update.source = result.update.source === 'mirror' ? 'mirror' : 'github';
-  result.update.mirrorResourceId = String(result.update.mirrorResourceId || '').trim().slice(0, 120);
-  result.update.mirrorCdk = String(result.update.mirrorCdk || '').trim().slice(0, 240);
   // Migrate the former single scale slider and clamp all display scales to
   // the supported 20%–200% range.
   const savedPet = saved.pet && typeof saved.pet === 'object' ? saved.pet : {};
@@ -259,12 +251,6 @@ function saveSettings(patch) {
 
   if (input.update && typeof input.update === 'object') {
     if (typeof input.update.repository === 'string') next.update.repository = input.update.repository.trim().slice(0, 200);
-    if (input.update.source === 'mirror' || input.update.source === 'github') next.update.source = input.update.source;
-    if (typeof input.update.mirrorResourceId === 'string') next.update.mirrorResourceId = input.update.mirrorResourceId.trim().slice(0, 120);
-    if (input.update.clearMirrorCdk === true) next.update.mirrorCdk = '';
-    if (typeof input.update.mirrorCdk === 'string' && input.update.mirrorCdk.trim()) {
-      next.update.mirrorCdk = input.update.mirrorCdk.trim().slice(0, 240);
-    }
   }
 
   if (input.automation && typeof input.automation === 'object') {
@@ -448,12 +434,6 @@ function toPublicSettings(settings = readSettings()) {
   const copy = mergeSettings(settings);
   return {
     ...copy,
-    update: {
-      repository: copy.update.repository,
-      source: copy.update.source,
-      mirrorResourceId: copy.update.mirrorResourceId,
-      mirrorCdkSet: Boolean(copy.update.mirrorCdk)
-    },
     persona: {
       name: copy.persona.name,
       relationship: copy.persona.relationship,

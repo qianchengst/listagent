@@ -240,12 +240,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .connection-group legend { padding: 0 6px; color: #eeeaff; font-size: 12px; font-weight: 700; }
 .connection-group .connection-note { margin-top: 0; }
 .connection-note { grid-column: 1 / -1; margin-top: -5px; padding: 8px 10px; border-radius: 8px; color: #aeb5d2; background: rgba(178, 170, 241, .08); font-size: 11px; }
-.update-source-fieldset { gap: 10px 12px; }
-.update-source-options { display: flex; flex-wrap: wrap; gap: 9px; grid-column: 1 / -1; }
-.update-source-options label { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 7px 11px; border: 1px solid rgba(183, 167, 255, .28); border-radius: 9px; color: #d8d5ed; background: rgba(158, 141, 255, .06); cursor: pointer; }
-.update-source-options label:has(input:checked) { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.update-source-options input { accent-color: var(--accent); }
-.update-source-note { grid-column: 1 / -1; margin: -2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .info-card { max-width: 620px; padding: 16px 18px; margin-top: 18px; color: #bdc4dd; line-height: 1.55; font-size: 13px; }
 .info-card strong { color: #eceaff; font-size: 13px; }
 .info-card p { margin: 7px 0 0; }
