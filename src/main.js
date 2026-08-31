@@ -12,12 +12,13 @@ const {
   saveSettings,
   toPublicSettings
 } = require('./settings-service');
-const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getModelUsageTotals, getSessionHistory, recordGreeting } = require('./agent-service');
+const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getModelUsageTotals, getSessionHistory, recordGreeting } = require('./agent-service');
 const { finishSession, getRecord: getCompanionRecord, recordConversation, recordModelUsage, recordMovement, startSession } = require('./companion-record-service');
 const { getWeChatStatus, captureWeChatWindow, sendTextToActiveWeChat } = require('./automation-service');
 const { detectWeChatBubble, stopWorker } = require('./yolo-service');
 const { findTopmostUnmaximizedWindows } = require('./topmost-window-service');
 const { getUpdateInfo, downloadUpdate } = require('./update-service');
+const { readPlans, addTodayPlan, updateTodayPlan, deleteTodayPlan, markTodayDone, updateWeeklySettings, upsertWeeklySlots, addEvent, updateEvent, deleteEvent, markEventDone, setTodoReminderTimes, consumeDueReminders, exportPlans, deleteAllPlanData } = require('./plan-service');
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +76,8 @@ let wechatLastCaptureHash = '';
 let wechatLastRepliedMessageKey = '';
 let wellbeingTimer;
 let wellbeingBusy = false;
+let planReminderTimer;
+let planReminderBusy = false;
 let wellbeingUsageStartedAt = Date.now();
 let wellbeingLastTriggerAt = 0;
 const WELLBEING_POLL_MS = 60000;
@@ -82,6 +85,7 @@ const WELLBEING_IDLE_RESET_SECONDS = 15 * 60;
 const WELLBEING_START_GRACE_MS = 5 * 60 * 1000;
 const WELLBEING_ACTIVE_MEAL_THRESHOLD_MS = 30 * 60 * 1000;
 const WELLBEING_ACTIVE_EYE_THRESHOLD_MS = 45 * 60 * 1000;
+const PLAN_REMINDER_POLL_MS = 30000;
 const greetingCache = new Map();
 const greetingInFlight = new Map();
 let lastWechatDebug = {
@@ -448,6 +452,12 @@ function broadcastCompanionRecord() {
   return record;
 }
 
+function broadcastPlans() {
+  const plans = readPlans();
+  if (consoleWindow && !consoleWindow.isDestroyed()) consoleWindow.webContents.send('plan:changed', plans);
+  return plans;
+}
+
 function startCompanionRecordMonitor() {
   if (companionRecordTimer) return;
   companionRecordTimer = setInterval(() => broadcastCompanionRecord(), 5000);
@@ -565,6 +575,69 @@ function syncWellbeingMonitor(config) {
   }
   if (wellbeingTimer) return;
   wellbeingTimer = setInterval(() => { void pollWellbeingReminder(); }, WELLBEING_POLL_MS);
+}
+
+function sendPlanReminder(payload) {
+  if (!bubbleWindow || bubbleWindow.isDestroyed()) return;
+  const send = () => {
+    if (!bubbleWindow || bubbleWindow.isDestroyed()) return;
+    bubbleWindow.webContents.send('agent:plan-reminder', payload);
+  };
+  if (bubbleWindow.webContents.isLoading()) bubbleWindow.webContents.once('did-finish-load', send);
+  else send();
+}
+
+async function pollPlanReminders() {
+  if (planReminderBusy || taskDepth > 0 || (confirmationWindow && confirmationWindow.isVisible()) || (consoleWindow && consoleWindow.isVisible())) return;
+  if (!petWindow || petWindow.isDestroyed()) return;
+  let due;
+  try {
+    due = consumeDueReminders(new Date());
+  } catch (error) {
+    console.warn(`读取计划提醒失败：${error.message}`);
+    return;
+  }
+  // prepareStore may have auto-completed a timed plan since the last poll.
+  // Push the prepared snapshot even when there is no reminder to display so
+  // the open planning panel reflects that state without a manual refresh.
+  if (consoleWindow && !consoleWindow.isDestroyed()) consoleWindow.webContents.send('plan:changed', due.store);
+  if (!due.reminders?.length) return;
+  planReminderBusy = true;
+  try {
+    const settings = readSettings();
+    for (const reminder of due.reminders.slice(0, 3)) {
+      try {
+        const text = await generatePlanReminder(settings, reminder);
+        stopAutoMove();
+        const hadBubbleWindow = Boolean(bubbleWindow && !bubbleWindow.isDestroyed());
+        const bubbleWasVisible = hadBubbleWindow && bubbleWindow.isVisible();
+        if (!bubbleWindow || bubbleWindow.isDestroyed()) createBubbleWindow();
+        positionBubbleWindow();
+        if (typeof bubbleWindow.showInactive === 'function') bubbleWindow.showInactive();
+        else bubbleWindow.show();
+        if (!bubbleWasVisible) sendChatHistory(bubbleWindow);
+        sendPlanReminder({ text, reminderType: reminder.type, timestamp: new Date().toISOString() });
+      } catch (error) {
+        console.warn(`生成计划提醒失败：${error.message}`);
+      }
+    }
+  } finally {
+    planReminderBusy = false;
+  }
+}
+
+function startPlanReminderMonitor() {
+  if (planReminderTimer) return;
+  planReminderTimer = setInterval(() => { void pollPlanReminders(); }, PLAN_REMINDER_POLL_MS);
+  // Check shortly after startup so an already-running app does not have to
+  // wait for the first full interval.
+  setTimeout(() => { void pollPlanReminders(); }, 1500);
+}
+
+function stopPlanReminderMonitor() {
+  if (planReminderTimer) clearInterval(planReminderTimer);
+  planReminderTimer = undefined;
+  planReminderBusy = false;
 }
 
 async function checkForUpdates() {
@@ -1377,6 +1450,77 @@ function registerIpc() {
     }
     return config;
   });
+  ipcMain.handle('plans:get', () => readPlans());
+  ipcMain.handle('plans:today-add', (_event, input) => {
+    const plans = addTodayPlan(input || {});
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:today-update', (_event, id, patch) => {
+    const plans = updateTodayPlan(String(id || ''), patch || {});
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:today-delete', (_event, id) => {
+    const plans = deleteTodayPlan(String(id || ''));
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:today-done', (_event, id, done) => {
+    const plans = markTodayDone(String(id || ''), done === true);
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:weekly-upsert', (_event, slots, stepMinutes) => {
+    const plans = upsertWeeklySlots(Array.isArray(slots) ? slots : [], stepMinutes);
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:weekly-settings', (_event, settings) => {
+    const plans = updateWeeklySettings(settings || {});
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:event-add', (_event, input) => {
+    const plans = addEvent(input || {});
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:event-update', (_event, id, patch) => {
+    const plans = updateEvent(String(id || ''), patch || {});
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:event-delete', (_event, id) => {
+    const plans = deleteEvent(String(id || ''));
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:event-done', (_event, id, done) => {
+    const plans = markEventDone(String(id || ''), done === true);
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:todo-reminders', (_event, values) => {
+    const plans = setTodoReminderTimes(Array.isArray(values) ? values : []);
+    broadcastPlans();
+    return plans;
+  });
+  ipcMain.handle('plans:export', async () => {
+    const defaultPath = path.join(app.getPath('desktop'), `listagent-plans-${new Date().toISOString().slice(0, 10)}.json`);
+    const answer = await dialog.showSaveDialog({
+      title: '导出计划数据',
+      defaultPath,
+      filters: [{ name: 'JSON 数据', extensions: ['json'] }]
+    });
+    if (answer.canceled || !answer.filePath) return { exported: false };
+    return { exported: true, path: exportPlans(answer.filePath) };
+  });
+  ipcMain.handle('plans:delete-all', (_event, includeArchive) => {
+    const plans = deleteAllPlanData(includeArchive === true);
+    broadcastPlans();
+    return plans;
+  });
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => installAvailableUpdate());
   ipcMain.handle('pet:choose-media', async (_event, state) => {
@@ -1522,6 +1666,7 @@ app.whenReady().then(() => {
   startSession();
   startAutoMoveWatchdog();
   startCompanionRecordMonitor();
+  startPlanReminderMonitor();
   // Start both greeting requests before either chat surface is opened. The
   // renderer then consumes the shared in-flight request or its cached result.
   warmGreetingCache();
@@ -1550,6 +1695,7 @@ app.on('before-quit', () => {
   stopAutoMoveWatchdog();
   stopWechatMonitor();
   stopWellbeingMonitor();
+  stopPlanReminderMonitor();
   stopCompanionRecordMonitor();
   finishSession();
   stopWorker();

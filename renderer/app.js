@@ -367,6 +367,13 @@
       const item = addMessage('assistant', String(text).trim());
       item.classList.add('wellbeing-message');
     });
+    api.onPlanReminder((payload) => {
+      const text = typeof payload === 'string' ? payload : payload?.text;
+      if (!text) return;
+      initialGreeting.hidden = true;
+      const item = addMessage('assistant', String(text).trim());
+      item.classList.add('plan-reminder-message');
+    });
     try {
       const config = await api.getConfig();
       name.textContent = config.persona.name || '桌宠';
@@ -633,6 +640,250 @@
       }
     }
     api.onCompanionRecordChanged(applyCompanionRecord);
+
+    // ---- Planning workspace -------------------------------------------------
+    let plans = null;
+    const selectedWeeklyCells = new Set();
+    let weeklyDragging = false;
+    const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const planClock = el('#plan-clock');
+    const todayPlanDate = el('#today-plan-date');
+    const todayPlanList = el('#today-plan-list');
+    const todoReminderList = el('#todo-reminder-list');
+    const eventPlanList = el('#event-plan-list');
+    const weeklyGrid = el('#weekly-grid');
+    const weeklySelectionCount = el('#weekly-selection-count');
+    const weeklyStatus = el('#weekly-status');
+    const planDataStatus = el('#plan-data-status');
+    const planArchiveCount = el('#plan-archive-count');
+    const todayArchiveList = el('#today-archive-list');
+    const eventArchiveList = el('#event-archive-list');
+    const formatPlanDateTime = (value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value || '');
+      return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+    const formatTodayDate = (key) => {
+      const date = new Date(`${key}T12:00:00`);
+      return Number.isNaN(date.getTime()) ? key : date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+    };
+    function updatePlanClock() {
+      if (planClock) planClock.textContent = new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    function createPlanEmpty(text) {
+      const empty = document.createElement('div');
+      empty.className = 'plan-empty';
+      empty.textContent = text;
+      return empty;
+    }
+    function renderTodayPlans() {
+      if (!todayPlanList || !plans?.today) return;
+      todayPlanList.innerHTML = '';
+      if (todayPlanDate) todayPlanDate.textContent = formatTodayDate(plans.today.bucketDate);
+      const items = [...plans.today.items].sort((a, b) => {
+        if (a.allDay !== b.allDay) return a.allDay ? 1 : -1;
+        return String(a.startTime || '').localeCompare(String(b.startTime || ''));
+      });
+      if (!items.length) { todayPlanList.append(createPlanEmpty('今天还没有安排，先写下一件想完成的事吧。')); return; }
+      items.forEach((item) => {
+        const row = document.createElement('article');
+        row.className = `plan-item ${item.allDay ? 'todo-item' : 'scheduled-item'}${item.done ? ' done' : ''}`;
+        const main = document.createElement(item.allDay ? 'button' : 'div');
+        main.className = `plan-item-main${item.allDay ? ' plan-item-toggle' : ''}`;
+        if (item.allDay) {
+          main.type = 'button';
+          main.ariaPressed = String(item.done);
+          main.ariaLabel = `${item.done ? '标记待办未完成' : '标记待办完成'}：${item.title}`;
+          main.addEventListener('click', async () => { plans = await api.markTodayDone(item.id, !item.done); renderPlans(plans); });
+        }
+        const title = document.createElement('div'); title.className = 'plan-item-title'; title.textContent = item.title;
+        const time = document.createElement('div'); time.className = 'plan-item-time'; time.textContent = item.allDay ? '无时间限制 · 待办 · 点击标签切换完成' : `${item.startTime || '--:--'}${item.endTime ? ` – ${item.endTime}` : ''}`;
+        main.append(title, time);
+        if (!item.allDay) {
+          const status = document.createElement('div'); status.className = 'plan-item-status'; status.textContent = item.done ? '已自动完成' : '到时间自动完成';
+          main.append(status);
+        }
+        const actions = document.createElement('div'); actions.className = 'plan-item-actions';
+        const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = '编辑';
+        edit.addEventListener('click', async () => {
+          const nextTitle = window.prompt('修改计划名称', item.title);
+          if (!nextTitle?.trim()) return;
+          plans = await api.updateTodayPlan(item.id, { title: nextTitle.trim() }); renderPlans(plans);
+        });
+        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除';
+        remove.addEventListener('click', async () => { plans = await api.deleteTodayPlan(item.id); renderPlans(plans); });
+        actions.append(edit, remove); row.append(main, actions); todayPlanList.append(row);
+      });
+    }
+    function renderTodoReminderTimes() {
+      if (!todoReminderList) return;
+      todoReminderList.innerHTML = '';
+      (plans?.todoReminderTimes || []).forEach((time) => {
+        const tag = document.createElement('span'); tag.className = 'time-tag'; tag.textContent = time;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.ariaLabel = `删除 ${time}`;
+        remove.addEventListener('click', async () => { plans = await api.saveTodoReminderTimes((plans.todoReminderTimes || []).filter((value) => value !== time)); renderPlans(plans); });
+        tag.append(remove); todoReminderList.append(tag);
+      });
+    }
+    function renderEvents() {
+      if (!eventPlanList) return;
+      eventPlanList.innerHTML = '';
+      const items = [...(plans?.events || [])].sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+      if (!items.length) { eventPlanList.append(createPlanEmpty('还没有日程。')); return; }
+      items.forEach((item) => {
+        const row = document.createElement('article'); row.className = `plan-item scheduled-item${item.done ? ' done' : ''}`;
+        const main = document.createElement('div'); main.className = 'plan-item-main';
+        const title = document.createElement('div'); title.className = 'plan-item-title'; title.textContent = item.title;
+        const time = document.createElement('div'); time.className = 'plan-item-time'; time.textContent = `${formatPlanDateTime(item.startAt)}${item.endAt ? ` – ${formatPlanDateTime(item.endAt)}` : ''}`;
+        const status = document.createElement('div'); status.className = 'plan-item-status'; status.textContent = item.done ? '已自动完成' : '到时间自动完成';
+        main.append(title, time, status);
+        const actions = document.createElement('div'); actions.className = 'plan-item-actions';
+        const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = '编辑';
+        edit.addEventListener('click', async () => {
+          const nextTitle = window.prompt('修改日程名称', item.title);
+          if (!nextTitle?.trim()) return;
+          plans = await api.updatePlanEvent(item.id, { title: nextTitle.trim() }); renderPlans(plans);
+        });
+        const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除';
+        remove.addEventListener('click', async () => { plans = await api.deletePlanEvent(item.id); renderPlans(plans); });
+        actions.append(edit, remove); row.append(main, actions); eventPlanList.append(row);
+      });
+    }
+    function renderPlanArchives() {
+      const todayArchives = Array.isArray(plans?.todayArchive) ? plans.todayArchive : [];
+      const eventArchives = Array.isArray(plans?.eventArchive) ? plans.eventArchive : [];
+      if (planArchiveCount) planArchiveCount.textContent = String(todayArchives.length + eventArchives.length);
+      if (todayArchiveList) {
+        todayArchiveList.innerHTML = '';
+        if (!todayArchives.length) todayArchiveList.append(createPlanEmpty('暂无归档'));
+        todayArchives.slice().reverse().forEach((archive) => {
+          const item = document.createElement('div'); item.className = 'archive-item';
+          item.textContent = archive.date || '未命名日期';
+          const detail = document.createElement('small'); detail.textContent = (archive.items || []).map((entry) => entry.title).join('、') || '无条目'; item.append(detail); todayArchiveList.append(item);
+        });
+      }
+      if (eventArchiveList) {
+        eventArchiveList.innerHTML = '';
+        if (!eventArchives.length) eventArchiveList.append(createPlanEmpty('暂无归档'));
+        eventArchives.slice().reverse().forEach((archive) => {
+          const event = archive.event || {}; const item = document.createElement('div'); item.className = 'archive-item'; item.textContent = event.title || '未命名日程';
+          const detail = document.createElement('small'); detail.textContent = formatPlanDateTime(event.startAt); item.append(detail); eventArchiveList.append(item);
+        });
+      }
+    }
+    function weeklyCellKey(day, start) { return `${day}|${start}`; }
+    function addMinutesToTime(time, minutes) {
+      const [hour, minute] = time.split(':').map(Number); const total = hour * 60 + minute + minutes;
+      return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    }
+    function updateWeeklySelectionUi() {
+      if (weeklySelectionCount) weeklySelectionCount.textContent = selectedWeeklyCells.size ? `已选择 ${selectedWeeklyCells.size} 个时间格` : '尚未选择时间格';
+      weeklyGrid?.querySelectorAll('.week-cell').forEach((cell) => cell.classList.toggle('selected', selectedWeeklyCells.has(cell.dataset.key)));
+    }
+    function normalizeWeeklyDuration(value) { return Math.min(240, Math.max(5, Math.round(Number(value) || 45))); }
+    function normalizeWeeklyRows(value) { return Math.min(40, Math.max(1, Math.round(Number(value) || 13))); }
+    function defaultWeeklyTime(index, duration) {
+      const total = 8 * 60 + index * duration;
+      return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    }
+    function weeklySettingsSnapshot() {
+      const rowCount = normalizeWeeklyRows(el('#weekly-row-count')?.value || plans?.weekly?.rowCount || 13);
+      const duration = normalizeWeeklyDuration(el('#weekly-duration')?.value || plans?.weekly?.durationMinutes || 45);
+      const rowInputs = weeklyGrid?.querySelectorAll('.weekly-row-time') || [];
+      const oldTimes = Array.isArray(plans?.weekly?.rowTimes) ? plans.weekly.rowTimes : [];
+      const rowTimes = Array.from({ length: rowCount }, (_item, index) => {
+        const input = rowInputs[index];
+        return input?.value || oldTimes[index] || defaultWeeklyTime(index, duration);
+      });
+      return { rowCount, durationMinutes: duration, rowTimes };
+    }
+    function renderWeeklyGrid() {
+      if (!weeklyGrid) return;
+      const rowCount = normalizeWeeklyRows(plans?.weekly?.rowCount || el('#weekly-row-count')?.value || 13);
+      const duration = normalizeWeeklyDuration(plans?.weekly?.durationMinutes || el('#weekly-duration')?.value || 45);
+      if (el('#weekly-row-count')) el('#weekly-row-count').value = rowCount;
+      if (el('#weekly-duration')) el('#weekly-duration').value = duration;
+      const rowTimes = Array.isArray(plans?.weekly?.rowTimes) ? plans.weekly.rowTimes : [];
+      const existing = new Map((plans?.weekly?.slots || []).map((slot) => [weeklyCellKey(slot.day, slot.start), slot]));
+      weeklyGrid.innerHTML = '';
+      const table = document.createElement('table'); table.className = 'weekly-table';
+      const head = document.createElement('thead'); const headRow = document.createElement('tr');
+      const blank = document.createElement('th'); blank.textContent = '时间'; headRow.append(blank);
+      weekdayNames.forEach((name) => { const th = document.createElement('th'); th.textContent = name; headRow.append(th); }); head.append(headRow); table.append(head);
+      const body = document.createElement('tbody');
+      for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+        const start = rowTimes[rowIndex] || defaultWeeklyTime(rowIndex, duration);
+        const row = document.createElement('tr'); const time = document.createElement('td'); time.className = 'weekly-time';
+        const timeInput = document.createElement('input'); timeInput.className = 'weekly-row-time'; timeInput.type = 'time'; timeInput.value = start; timeInput.ariaLabel = `第 ${rowIndex + 1} 行时间`;
+        timeInput.addEventListener('change', async () => {
+          const settings = weeklySettingsSnapshot();
+          settings.rowTimes[rowIndex] = timeInput.value || defaultWeeklyTime(rowIndex, settings.durationMinutes);
+          try { plans = await api.saveWeeklySettings(settings); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存行表头时间。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存行表头失败：${error.message}`; }
+        });
+        time.append(timeInput); row.append(time);
+        for (let day = 0; day < 7; day += 1) {
+          const key = weeklyCellKey(day, start); const cell = document.createElement('td'); cell.className = 'week-cell'; cell.dataset.key = key; cell.dataset.day = String(day); cell.dataset.start = start;
+          const slot = existing.get(key); if (slot) { cell.classList.add('has-plan'); const text = document.createElement('span'); text.className = 'week-cell-title'; text.textContent = slot.title; cell.append(text); }
+          cell.addEventListener('pointerdown', (event) => { if (event.button !== 0) return; event.preventDefault(); weeklyDragging = true; selectedWeeklyCells.clear(); selectedWeeklyCells.add(key); updateWeeklySelectionUi(); });
+          cell.addEventListener('pointerenter', () => { if (!weeklyDragging) return; selectedWeeklyCells.add(key); updateWeeklySelectionUi(); });
+          row.append(cell);
+        }
+        body.append(row);
+      }
+      table.append(body); weeklyGrid.append(table); updateWeeklySelectionUi();
+    }
+    function renderPlans(snapshot) {
+      plans = snapshot || plans; if (!plans) return;
+      renderTodayPlans(); renderTodoReminderTimes(); renderEvents(); renderWeeklyGrid(); renderPlanArchives(); updatePlanClock();
+    }
+    window.addEventListener('pointerup', () => { weeklyDragging = false; });
+    api.onPlansChanged((snapshot) => renderPlans(snapshot));
+    el('#plan-clock')?.addEventListener('click', updatePlanClock);
+    document.querySelectorAll('.plan-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const viewName = tab.dataset.planView;
+        document.querySelectorAll('.plan-tab').forEach((item) => { const active = item === tab; item.classList.toggle('active', active); item.setAttribute('aria-selected', String(active)); });
+        document.querySelectorAll('.plan-view').forEach((panel) => { const active = panel.id === `plan-view-${viewName}`; panel.classList.toggle('active', active); panel.hidden = !active; });
+      });
+    });
+    el('#today-plan-all-day')?.addEventListener('change', (event) => { ['#today-plan-start', '#today-plan-end'].forEach((selector) => { const input = el(selector); input.disabled = event.target.checked; if (event.target.checked) input.value = ''; }); });
+    el('#today-plan-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault(); const title = el('#today-plan-title').value.trim(); if (!title) return;
+      try { plans = await api.addTodayPlan({ title, startTime: el('#today-plan-start').value, endTime: el('#today-plan-end').value, allDay: el('#today-plan-all-day').checked }); event.target.reset(); ['#today-plan-start', '#today-plan-end'].forEach((selector) => { el(selector).disabled = false; }); renderPlans(plans); }
+      catch (error) { window.alert(`添加今日安排失败：${error.message}`); }
+    });
+    el('#todo-reminder-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault(); const time = el('#todo-reminder-time').value; if (!time) return;
+      try { plans = await api.saveTodoReminderTimes([...(plans?.todoReminderTimes || []), time]); renderPlans(plans); } catch (error) { window.alert(`保存提醒时间失败：${error.message}`); }
+    });
+    const saveWeeklyTableSettings = async () => {
+      const settings = weeklySettingsSnapshot();
+      if (el('#weekly-row-count')) el('#weekly-row-count').value = settings.rowCount;
+      if (el('#weekly-duration')) el('#weekly-duration').value = settings.durationMinutes;
+      try { plans = await api.saveWeeklySettings(settings); selectedWeeklyCells.clear(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = `已保存表格设置：${settings.rowCount} 行，每行 ${settings.durationMinutes} 分钟。`; }
+      catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存表格设置失败：${error.message}`; }
+    };
+    el('#weekly-settings-save')?.addEventListener('click', saveWeeklyTableSettings);
+    el('#weekly-row-count')?.addEventListener('change', saveWeeklyTableSettings);
+    el('#weekly-duration')?.addEventListener('change', saveWeeklyTableSettings);
+    el('#weekly-save')?.addEventListener('click', async () => {
+      const title = el('#weekly-plan-title').value.trim(); if (!selectedWeeklyCells.size || !title) { if (weeklyStatus) weeklyStatus.textContent = '请先选择时间格并填写计划名称。'; return; }
+      const duration = normalizeWeeklyDuration(el('#weekly-duration').value);
+      const slots = [...selectedWeeklyCells].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title }; });
+      try { plans = await api.upsertWeeklySlots(slots, duration); el('#weekly-plan-title').value = ''; selectedWeeklyCells.clear(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存每周重复计划。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存失败：${error.message}`; }
+    });
+    el('#weekly-clear')?.addEventListener('click', async () => {
+      if (!selectedWeeklyCells.size) return; const duration = normalizeWeeklyDuration(el('#weekly-duration').value); const slots = [...selectedWeeklyCells].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title: '' }; });
+      try { plans = await api.upsertWeeklySlots(slots, duration); selectedWeeklyCells.clear(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已清除选中时间格。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `清除失败：${error.message}`; }
+    });
+    el('#event-plan-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault(); const title = el('#event-plan-title').value.trim(); const startAt = el('#event-plan-start').value; if (!title || !startAt) return;
+      try { plans = await api.addPlanEvent({ title, startAt, endAt: el('#event-plan-end').value }); event.target.reset(); renderPlans(plans); } catch (error) { window.alert(`添加日程失败：${error.message}`); }
+    });
+    el('#export-plans')?.addEventListener('click', async () => { try { const result = await api.exportPlans(); if (planDataStatus) planDataStatus.textContent = result.exported ? `计划数据已导出：${result.path}` : '已取消导出。'; } catch (error) { if (planDataStatus) planDataStatus.textContent = `导出失败：${error.message}`; } });
+    el('#delete-all-plans')?.addEventListener('click', async () => { if (!window.confirm('确定清空当前计划吗？已归档历史不会被删除。')) return; try { plans = await api.deleteAllPlans(); renderPlans(plans); if (planDataStatus) planDataStatus.textContent = '当前计划已清空。'; } catch (error) { if (planDataStatus) planDataStatus.textContent = `清空失败：${error.message}`; } });
+    el('#delete-all-plan-data')?.addEventListener('click', async () => { if (!window.confirm('确定删除全部计划数据吗？当前计划和归档都将永久删除。')) return; try { plans = await api.deleteAllPlans(true); renderPlans(plans); if (planDataStatus) planDataStatus.textContent = '全部计划数据已删除。'; } catch (error) { if (planDataStatus) planDataStatus.textContent = `删除失败：${error.message}`; } });
+    setInterval(updatePlanClock, 30000);
 
     function formatMegabytes(bytes) {
       const value = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
@@ -1246,6 +1497,7 @@
 
     applyConfig(await api.getConfig());
     try { applyCompanionRecord(await api.getCompanionRecord()); } catch { /* metrics remain at zero if persistence is unavailable. */ }
+    try { renderPlans(await api.getPlans()); } catch (error) { if (planDataStatus) planDataStatus.textContent = `计划读取失败：${error.message}`; }
     let history = [];
     try { history = await api.getChatHistory(); } catch { /* use an empty transcript if persistence is unavailable. */ }
     if (Array.isArray(pendingHistory)) history = pendingHistory;

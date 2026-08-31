@@ -861,6 +861,63 @@ async function generateWellbeingMessage(settings, scene = {}) {
   return content.slice(0, 240);
 }
 
+function formatReminderInstant(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+async function generatePlanReminder(settings, reminder = {}) {
+  const type = reminder.type === 'todo' ? '无时间待办' : reminder.type === 'weekly' ? '每周重复计划' : reminder.type === 'event' ? '日程' : '今日安排';
+  const item = reminder.item || {};
+  const title = String(item.title || '').trim();
+  const start = String(item.startTime || item.start || '').trim();
+  const end = String(item.endTime || item.end || '').trim();
+  const eventStart = String(item.startAt || '').trim();
+  const eventEnd = String(item.endAt || '').trim();
+  const note = String(item.description || item.note || item.notes || '').trim();
+  const todoList = Array.isArray(reminder.items) ? reminder.items.filter(Boolean).slice(0, 12).join('、') : '';
+  const startsAtText = formatReminderInstant(reminder.startsAt || eventStart);
+  const startsAtMs = new Date(reminder.startsAt || eventStart).getTime();
+  const minutesUntilStart = Number.isFinite(startsAtMs)
+    ? Math.max(0, Math.round((startsAtMs - Date.now()) / 60000))
+    : 15;
+  const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const scheduleDetails = reminder.type === 'todo'
+    ? [
+        `提醒时间：${String(reminder.reminderTime || '现在').trim()}`,
+        `今天尚未完成的待办：${todoList || '暂无'}`
+      ].join('\n')
+    : [
+        `计划类型：${type}`,
+        `计划名称：${title || '未命名计划'}`,
+        reminder.type === 'weekly' && Number.isInteger(Number(item.day)) ? `重复日：${weekdayNames[Number(item.day)]}` : '',
+        start ? `开始时间：${start}` : '',
+        end ? `结束时间：${end}` : '',
+        eventStart ? `日程开始：${eventStart}` : '',
+        eventEnd ? `日程结束：${eventEnd}` : '',
+        startsAtText ? `本机时间下的开始时刻：${startsAtText}` : '',
+        note ? `补充内容：${note}` : '',
+        `距离开始约 ${minutesUntilStart} 分钟`
+      ].filter(Boolean).join('\n');
+  const prompt = {
+    role: 'user',
+    content: `桌宠需要主动提醒使用者。下面是这次提醒对应的完整计划内容，请先理解这些字段，再重新组织一句自然的中文提醒：
+${scheduleDetails}
+
+请严格依据完整人格设定、使用者与你的关系以及语言示例，写一句自然、有人情味、带有提醒行动感的话。计划名称、时间和补充内容都是真实信息，不能擅自编造；有具体计划时要准确说清计划名称，并让使用者知道它即将开始或需要准备。可以用“快到时间了”“等会儿”等更自然的说法，不要机械拼接“十五分钟后+计划名”，也不要把字段标签照搬到句子里。无时间待办提醒时，要自然地列出尚未完成的待办。
+
+不要提及“后台监测”“定时器”“模型”“系统”或这条提示的生成过程，不要输出 JSON、Markdown、引号、前缀或“计划名称：/距离开始：”等字段格式。只输出一条适合直接显示在气泡里的连贯中文正文，长度不超过 160 字。`
+  };
+  const message = await requestCompletion(settings, [prompt], { allowTools: false });
+  const content = messageText(message.content).trim().replace(/^['"“”]+|['"“”]+$/g, '');
+  if (!content) throw new Error('模型未返回计划提醒。');
+  return content.slice(0, 320);
+}
+
 function compactVisionImage(imageBase64) {
   if (!nativeImage?.createFromBuffer || typeof imageBase64 !== 'string') return null;
   try {
@@ -1206,4 +1263,4 @@ function clearSession(sessionId = 'default') {
   persistSessions();
 }
 
-module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, getSessionHistory, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
+module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getSessionHistory, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
