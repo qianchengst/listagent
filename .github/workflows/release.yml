@@ -75,12 +75,4 @@ jobs:
             } else {
               gh release create $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
             }
-      - name: Trigger optional Mirror酱 publishing
-        if: ${{ vars.MIRRORCHYAN_ENABLED == 'true' && vars.MIRRORCHYAN_RID != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          gh workflow run mirrorchyan-release.yml --repo $env:GITHUB_REPOSITORY -f tag=$env:RELEASE_TAG
-          gh workflow run mirrorchyan-release-note.yml --repo $env:GITHUB_REPOSITORY -f tag=$env:RELEASE_TAG
           }
