@@ -6,7 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {
   safeRelativePath, createDeltaPlan, compareVersions, MIN_DELTA_CLIENT_VERSION,
-  normalizeGiteeRepository, configuredGiteeRepository, configuredUpdateSource
+  normalizeGiteeRepository, configuredGiteeRepository, configuredUpdateSource, selectAssetParts
 } = require('../src/update-service');
 
 test('delta updates start with v0.2.9 clients', () => {
@@ -30,6 +30,29 @@ test('incremental update paths stay inside the packaged application surface', ()
   assert.equal(safeRelativePath('../data/settings.json'), null);
   assert.equal(safeRelativePath('.runtime/updates/payload'), null);
   assert.equal(safeRelativePath('node_modules/electron.exe'), null);
+});
+
+test('Gitee split archives require contiguous numbered parts', () => {
+  const base = 'https://gitee.com/qianchengst/listagent/releases/download/v0.2.13/';
+  const parts = selectAssetParts([
+    { name: 'listagent-windows-x64.zip.part02', size: 20, download_url: `${base}listagent-windows-x64.zip.part02` },
+    { name: 'listagent-windows-x64.zip.part01', size: 10, download_url: `${base}listagent-windows-x64.zip.part01` },
+    { name: 'notes.zip.part01', size: 10, download_url: `${base}notes.zip.part01` }
+  ]);
+  assert.equal(parts.name, 'listagent-windows-x64.zip');
+  assert.deepEqual(parts.parts.map((part) => part.partIndex), [1, 2]);
+  assert.equal(parts.size, 30);
+  assert.equal(selectAssetParts([
+    { name: 'listagent-windows-x64.zip.part01', size: 10, download_url: `${base}listagent-windows-x64.zip.part01` },
+    { name: 'listagent-windows-x64.zip.part03', size: 10, download_url: `${base}listagent-windows-x64.zip.part03` }
+  ]), null);
+  const preferred = selectAssetParts([
+    { name: 'listagent-windows-x64-v0.2.13.zip.part01', size: 100, download_url: `${base}old.part01` },
+    { name: 'listagent-windows-x64-v0.2.13.zip.part02', size: 100, download_url: `${base}old.part02` },
+    { name: 'listagent-windows-x64-v0.2.13-gitee.zip.part01', size: 1, download_url: `${base}new.part01` },
+    { name: 'listagent-windows-x64-v0.2.13-gitee.zip.part02', size: 1, download_url: `${base}new.part02` }
+  ]);
+  assert.equal(preferred.name, 'listagent-windows-x64-v0.2.13-gitee.zip');
 });
 
 test('incremental update plan skips files whose hashes already match', () => {

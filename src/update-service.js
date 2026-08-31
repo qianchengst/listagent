@@ -108,6 +108,42 @@ function selectAsset(assets = []) {
     })[0] || null;
 }
 
+// Gitee limits a single Release attachment to 100 MB. The sync script therefore
+// publishes large archives as `archive.zip.part01`, `archive.zip.part02`, ... .
+// Keep the split protocol deliberately strict so unrelated attachments (and
+// missing/reordered pieces) can never be mistaken for an update package.
+function selectAssetParts(assets = []) {
+  const groups = new Map();
+  for (const asset of assets) {
+    const name = String(asset?.name || '');
+    const downloadUrl = asset?.browser_download_url || asset?.download_url;
+    const match = name.match(/^(.+\.zip)\.part(\d{2,})$/i);
+    if (!match || typeof downloadUrl !== 'string') continue;
+    const index = Number(match[2]);
+    if (!Number.isInteger(index) || index < 1 || index > 9999) continue;
+    const baseName = match[1];
+    if (!groups.has(baseName)) groups.set(baseName, []);
+    groups.get(baseName).push({ ...asset, partIndex: index, baseName });
+  }
+  const candidates = [];
+  for (const [baseName, parts] of groups.entries()) {
+    const ordered = parts.slice().sort((left, right) => left.partIndex - right.partIndex);
+    if (ordered.length < 2 || ordered.some((part, index) => part.partIndex !== index + 1)) continue;
+    candidates.push({
+      name: baseName,
+      size: ordered.reduce((sum, part) => sum + (Number(part.size) || 0), 0),
+      parts: ordered
+    });
+  }
+  return candidates.sort((left, right) => {
+    const score = (asset) => {
+      const name = String(asset.name || '');
+      return (/windows|portable|listagent/i.test(name) ? 1 : 0) + (/gitee/i.test(name) ? 2 : 0);
+    };
+    return score(right) - score(left) || right.size - left.size;
+  })[0] || null;
+}
+
 function selectManifestAsset(assets = []) {
   return assets.find((asset) => asset && String(asset.name || '').toLowerCase() === MANIFEST_NAME
     && typeof (asset.browser_download_url || asset.download_url) === 'string') || null;
@@ -117,8 +153,10 @@ function normalizeAsset(asset) {
   return asset ? {
     name: asset.name,
     size: Number(asset.size) || 0,
-    downloadUrl: asset.browser_download_url || asset.download_url,
-    digest: asset.digest || ''
+    downloadUrl: asset.browser_download_url || asset.download_url
+      || asset.parts?.[0]?.browser_download_url || asset.parts?.[0]?.download_url || '',
+    digest: asset.digest || '',
+    parts: Array.isArray(asset.parts) ? asset.parts.map((part) => normalizeAsset(part)) : null
   } : null;
 }
 
@@ -197,6 +235,7 @@ async function getGiteeUpdateInfo(repository, version) {
   const release = await response.json();
   const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '') || version;
   const asset = selectAsset(release.assets);
+  const splitAsset = selectAssetParts(release.assets);
   return {
     configured: true, source: 'gitee', repository: '', giteeRepository: repository,
     currentVersion: version, latestVersion,
@@ -207,7 +246,7 @@ async function getGiteeUpdateInfo(repository, version) {
     notes: String(release.body || '').slice(0, 4000),
     // Gitee publishes the portable archive as a full package. Delta manifests
     // remain a GitHub-only optimization because their raw file URLs point at GitHub.
-    mode: 'full', manifestAsset: null, asset: normalizeAsset(asset)
+    mode: 'full', manifestAsset: null, asset: normalizeAsset(splitAsset || asset)
   };
 }
 
@@ -307,22 +346,42 @@ async function downloadDeltaUpdate(updateInfo, manifest, onProgress) {
 async function downloadFullArchive(updateInfo, onProgress) {
   const asset = updateInfo?.asset;
   if (!asset?.downloadUrl || !(isGithubUrl(asset.downloadUrl) || isGiteeUrl(asset.downloadUrl))) throw new Error('此版本没有可下载的 Windows 更新包。');
-  if (asset.size > MAX_DOWNLOAD_BYTES) throw new Error('更新包超过允许的大小限制。');
+  const parts = Array.isArray(asset.parts) && asset.parts.length > 1 ? asset.parts : null;
+  if (!parts && asset.size > MAX_DOWNLOAD_BYTES) throw new Error('更新包超过允许的大小限制。');
+  if (parts && parts.some((part) => !part?.downloadUrl || !isGiteeUrl(part.downloadUrl))) throw new Error('更新包分卷下载地址无效。');
+  if (parts && parts.some((part) => Number(part.size) > MAX_DOWNLOAD_BYTES)) throw new Error('更新包分卷超过允许的大小限制。');
   fs.mkdirSync(UPDATE_DIR, { recursive: true });
   const filename = `listagent-${updateInfo.latestVersion || Date.now()}.zip`.replace(/[^a-zA-Z0-9._-]/g, '_');
   const temporaryPath = path.join(UPDATE_DIR, `${filename}.part`); const archivePath = path.join(UPDATE_DIR, filename);
-  const response = await fetch(asset.downloadUrl, { headers: { Accept: 'application/octet-stream', 'User-Agent': 'listagent-update-downloader' } });
-  if (!response.ok) throw new Error(`更新包下载失败（HTTP ${response.status}）。`);
-  onProgress?.({ phase: 'download', downloaded: 0, total: asset.size || 0, files: 1, completedFiles: 0 });
-  const buffer = await readLimitedResponse(response, MAX_DOWNLOAD_BYTES, '更新包', (received, declared) => {
-    onProgress?.({
-      phase: 'download', downloaded: received, total: asset.size || declared || 0,
-      currentFile: asset.name || 'listagent-windows-x64.zip', files: 1, completedFiles: 0
-    });
-  }); verifyDigest(buffer, asset.digest, '更新包');
-  fs.writeFileSync(temporaryPath, buffer); fs.renameSync(temporaryPath, archivePath);
-  onProgress?.({ phase: 'complete', downloaded: buffer.length, total: asset.size || buffer.length, files: 1, completedFiles: 1 });
-  return { kind: 'archive', archivePath, files: null, bytes: buffer.length };
+  const downloads = parts || [asset];
+  const total = parts ? parts.reduce((sum, part) => sum + (Number(part.size) || 0), 0) : (asset.size || 0);
+  let bytes = 0;
+  try {
+    fs.writeFileSync(temporaryPath, Buffer.alloc(0));
+    onProgress?.({ phase: 'download', downloaded: 0, total, files: downloads.length, completedFiles: 0 });
+    for (let index = 0; index < downloads.length; index += 1) {
+      const item = downloads[index];
+      const response = await fetch(item.downloadUrl, { headers: { Accept: 'application/octet-stream', 'User-Agent': 'listagent-update-downloader' } });
+      if (!response.ok) throw new Error(`更新包下载失败（${item.name || asset.name || '分卷'}，HTTP ${response.status}）。`);
+      const buffer = await readLimitedResponse(response, MAX_DOWNLOAD_BYTES, `更新包 ${item.name || asset.name || ''}`.trim(), (received, declared) => {
+        onProgress?.({
+          phase: 'download', downloaded: bytes + received, total: total || (bytes + (declared || 0)),
+          currentFile: item.name || asset.name || 'listagent-windows-x64.zip', files: downloads.length, completedFiles: index
+        });
+      });
+      verifyDigest(buffer, item.digest, `更新包 ${item.name || '分卷'}`);
+      bytes += buffer.length;
+      if (bytes > MAX_DOWNLOAD_BYTES) throw new Error('更新包超过允许的大小限制。');
+      fs.appendFileSync(temporaryPath, buffer);
+      onProgress?.({ phase: 'download', downloaded: bytes, total: total || bytes, currentFile: item.name || asset.name || 'listagent-windows-x64.zip', files: downloads.length, completedFiles: index + 1 });
+    }
+    fs.renameSync(temporaryPath, archivePath);
+  } catch (error) {
+    try { fs.rmSync(temporaryPath, { force: true }); } catch { /* Best effort cleanup. */ }
+    throw error;
+  }
+  onProgress?.({ phase: 'complete', downloaded: bytes, total: total || bytes, files: downloads.length, completedFiles: downloads.length });
+  return { kind: 'archive', archivePath, files: parts ? parts.length : null, bytes };
 }
 
 async function downloadUpdate(updateInfo, onProgress) {
@@ -342,5 +401,5 @@ async function downloadUpdate(updateInfo, onProgress) {
 module.exports = {
   configuredRepository, configuredGiteeRepository, configuredUpdateSource,
   normalizeGiteeRepository, compareVersions, currentVersion, safeRelativePath,
-  createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION
+  createDeltaPlan, selectAssetParts, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION
 };
