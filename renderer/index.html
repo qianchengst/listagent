@@ -208,9 +208,9 @@
                 <label><input type="radio" name="update-source" value="gitee" /> 国内源（Gitee）</label>
                 <label><input type="radio" name="update-source" value="github" checked /> 国外源（GitHub）</label>
               </div>
-              <p class="update-source-note">Gitee 仅发布和下载 Windows 完整包；GitHub 仍支持增量更新。</p>
+              <p class="update-source-note">Gitee 需要仓库先发布同名 Release 和 Windows 完整包；GitHub 仍支持增量更新。</p>
               <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="默认：qianchengst/listagent" /></label>
-              <label>Gitee 更新仓库<input id="gitee-repository" type="text" placeholder="例如：你的用户名/listagent" /></label>
+              <label>Gitee 更新仓库<input id="gitee-repository" type="text" placeholder="默认：qianchengst/listagent" /></label>
             </fieldset>
           </form>
           <aside class="info-card"><strong>模型分工</strong><p>普通对话、工具调用和自动化指令使用纯文本连接；只有读取微信截图时才调用视觉连接。两组连接可以分别使用不同平台、Base URL、API Key 和模型。</p></aside>

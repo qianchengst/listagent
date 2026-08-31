@@ -10,7 +10,9 @@ const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const MAX_PERSONA_TEXT_LENGTH = 50000;
 const DEFAULT_UPDATE_REPOSITORY = 'qianchengst/listagent';
-const DEFAULT_GITEE_REPOSITORY = '';
+// Keep the domestic source prefilled so new installs and migrated settings
+// can use the project's official Gitee mirror without manual re-entry.
+const DEFAULT_GITEE_REPOSITORY = 'qianchengst/listagent';
 
 const DEFAULT_SETTINGS = Object.freeze({
   version: 2,
@@ -96,7 +98,11 @@ function mergeSettings(saved = {}) {
     result.update.repository = String(result.update.repository).trim().slice(0, 200);
   }
   result.update.source = String(result.update.source || '').toLowerCase() === 'gitee' ? 'gitee' : 'github';
-  result.update.giteeRepository = String(result.update.giteeRepository || '').trim().slice(0, 200);
+  if (!String(result.update.giteeRepository || '').trim()) {
+    result.update.giteeRepository = DEFAULT_GITEE_REPOSITORY;
+  } else {
+    result.update.giteeRepository = String(result.update.giteeRepository).trim().slice(0, 200);
+  }
   // Migrate the former single scale slider and clamp all display scales to
   // the supported 20%–200% range.
   const savedPet = saved.pet && typeof saved.pet === 'object' ? saved.pet : {};

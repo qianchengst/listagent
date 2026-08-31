@@ -72,7 +72,7 @@ npm start
 
 ### Gitee 国内源与自动同步
 
-“连接”页面可以在“国内源（Gitee）/国外源（GitHub）”之间切换。Gitee 源读取 `https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest`，并下载 Release 中的 Windows 完整包；GitHub 源保留增量更新能力。使用 Gitee 源时，在“Gitee 更新仓库”填写 `owner/repository`。
+“连接”页面可以在“国内源（Gitee）/国外源（GitHub）”之间切换，Gitee 更新仓库默认填写 `qianchengst/listagent`。Gitee 源读取 `https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest`，因此仓库必须先发布同名 Release 并上传 Windows 完整包；GitHub 源保留增量更新能力。使用其他 Gitee 仓库时，在“Gitee 更新仓库”填写 `owner/repository`。
 
 要启用发布同步，在 GitHub 仓库的 Settings → Secrets and variables → Actions 中配置：
 

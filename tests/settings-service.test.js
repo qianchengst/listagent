@@ -48,6 +48,12 @@ test('update repository defaults to the official project when missing or blank',
   assert.equal(toPublicSettings({ update: { repository: '  custom-owner/custom-repo  ' } }).update.repository, 'custom-owner/custom-repo');
 });
 
+test('Gitee update repository defaults to the official domestic mirror', () => {
+  assert.equal(toPublicSettings({}).update.giteeRepository, 'qianchengst/listagent');
+  assert.equal(toPublicSettings({ update: { giteeRepository: '' } }).update.giteeRepository, 'qianchengst/listagent');
+  assert.equal(toPublicSettings({ update: { giteeRepository: '  custom-owner/custom-repo  ' } }).update.giteeRepository, 'custom-owner/custom-repo');
+});
+
 test('persona relationship is preserved and has a useful default', () => {
   const defaultSettings = toPublicSettings({ persona: {} });
   assert.equal(defaultSettings.persona.relationship, '值得信任的搭档');
