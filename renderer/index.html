@@ -202,10 +202,19 @@
               <div id="vision-key-state" class="connection-note">视觉 API Key 尚未保存</div>
             </fieldset>
             <label class="range-label">温度 <output id="temperature-output">0.7</output><input id="temperature" type="range" min="0" max="1.5" step="0.1" value="0.7" /></label>
-            <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="默认：qianchengst/listagent" /></label>
+            <fieldset class="connection-group wide-field update-source-fieldset">
+              <legend>更新来源</legend>
+              <div class="update-source-options" role="radiogroup" aria-label="更新来源">
+                <label><input type="radio" name="update-source" value="gitee" /> 国内源（Gitee）</label>
+                <label><input type="radio" name="update-source" value="github" checked /> 国外源（GitHub）</label>
+              </div>
+              <p class="update-source-note">Gitee 仅发布和下载 Windows 完整包；GitHub 仍支持增量更新。</p>
+              <label>GitHub 更新仓库<input id="update-repository" type="text" placeholder="默认：qianchengst/listagent" /></label>
+              <label>Gitee 更新仓库<input id="gitee-repository" type="text" placeholder="例如：你的用户名/listagent" /></label>
+            </fieldset>
           </form>
           <aside class="info-card"><strong>模型分工</strong><p>普通对话、工具调用和自动化指令使用纯文本连接；只有读取微信截图时才调用视觉连接。两组连接可以分别使用不同平台、Base URL、API Key 和模型。</p></aside>
-          <article class="info-card update-card"><strong>应用更新</strong><p>从 GitHub Releases 检查 Windows 便携版更新。新版会先下载更新清单，只传输本机缺少或已变化的程序文件；仅旧 Release 没有清单或 Electron 运行时发生变化时才回退下载完整包。人格、API 设置、聊天记录、模型和桌宠素材都会保留。</p><div class="update-actions"><button id="check-updates" class="outline-button">检查更新</button><button id="install-update" class="primary-button" hidden>立即更新</button><output id="update-progress" class="update-progress" hidden aria-live="polite"></output></div><p id="update-status" class="status-text" aria-live="polite"></p></article>
+          <article class="info-card update-card"><strong>应用更新</strong><p>可从 Gitee（国内源）或 GitHub（国外源）检查 Windows 便携版更新。GitHub 新版会优先下载变化文件；Gitee Release 为完整包。人格、API 设置、聊天记录、模型和桌宠素材都会保留。</p><div class="update-actions"><button id="check-updates" class="outline-button">检查更新</button><button id="install-update" class="primary-button" hidden>立即更新</button><output id="update-progress" class="update-progress" hidden aria-live="polite"></output></div><p id="update-status" class="status-text" aria-live="polite"></p></article>
         </section>
 
         <section id="panel-automation" class="panel">

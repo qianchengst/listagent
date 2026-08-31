@@ -76,3 +76,32 @@ jobs:
               gh release create $env:RELEASE_TAG listagent-windows-x64.zip --repo $env:GITHUB_REPOSITORY --title "listagent $env:RELEASE_TAG" --generate-notes
             }
           }
+      - name: Check Gitee Release configuration
+        id: gitee-config
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
+        shell: pwsh
+        run: |
+          $ownerOk = $env:GITEE_OWNER -match '^[A-Za-z0-9_.-]+$'
+          $repositoryOk = $env:GITEE_REPOSITORY -match '^[A-Za-z0-9_.-]+$'
+          $enabled = -not [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN) -and $ownerOk -and $repositoryOk
+          "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $enabled) { Write-Host 'Gitee Release sync skipped: configure GITEE_TOKEN and GITEE_OWNER/GITEE_REPOSITORY.' }
+      - name: Sync Release assets to Gitee
+        if: steps.gitee-config.outputs.enabled == 'true'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $releaseName = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json name --jq .name
+          $releaseBody = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json body --jq .body
+          $files = @("$env:GITHUB_WORKSPACE/listagent-windows-x64.zip")
+          if (Test-Path -LiteralPath "$env:GITHUB_WORKSPACE/listagent-update-manifest.json") {
+            $files += "$env:GITHUB_WORKSPACE/listagent-update-manifest.json"
+          }
+          ./scripts/sync-gitee-release.ps1 -Owner $env:GITEE_OWNER -Repository $env:GITEE_REPOSITORY -Tag $env:RELEASE_TAG -Name $releaseName -Body $releaseBody -Files $files

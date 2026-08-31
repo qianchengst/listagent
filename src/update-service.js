@@ -28,6 +28,21 @@ function normalizeRepository(value) {
   return match ? `${match[1]}/${match[2]}` : '';
 }
 
+function normalizeGiteeRepository(value) {
+  const raw = String(value || '').trim().replace(/\.git$/i, '').replace(/\/+$/, '');
+  if (!raw) return '';
+  const match = raw.match(/^(?:https?:\/\/(?:www\.)?gitee\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/i);
+  return match ? `${match[1]}/${match[2]}` : '';
+}
+
+function configuredGiteeRepository(settings = {}) {
+  return normalizeGiteeRepository(settings.update?.giteeRepository);
+}
+
+function configuredUpdateSource(settings = {}) {
+  return String(settings.update?.source || '').toLowerCase() === 'gitee' ? 'gitee' : 'github';
+}
+
 function configuredRepository(settings = {}) {
   const fromSettings = normalizeRepository(settings.update?.repository);
   if (fromSettings) return fromSettings;
@@ -58,6 +73,13 @@ function isGithubUrl(value) {
   } catch { return false; }
 }
 
+function isGiteeUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'gitee.com';
+  } catch { return false; }
+}
+
 function isAllowedRawUrl(value, repository) {
   try {
     const url = new URL(String(value));
@@ -79,7 +101,7 @@ function safeRelativePath(value) {
 
 function selectAsset(assets = []) {
   return assets
-    .filter((asset) => asset && typeof asset.browser_download_url === 'string' && /\.zip$/i.test(asset.name || ''))
+    .filter((asset) => asset && typeof (asset.browser_download_url || asset.download_url) === 'string' && /\.zip$/i.test(asset.name || ''))
     .sort((left, right) => {
       const score = (asset) => /windows|portable|listagent/i.test(asset.name || '') ? 1 : 0;
       return score(right) - score(left);
@@ -88,14 +110,14 @@ function selectAsset(assets = []) {
 
 function selectManifestAsset(assets = []) {
   return assets.find((asset) => asset && String(asset.name || '').toLowerCase() === MANIFEST_NAME
-    && typeof asset.browser_download_url === 'string') || null;
+    && typeof (asset.browser_download_url || asset.download_url) === 'string') || null;
 }
 
 function normalizeAsset(asset) {
   return asset ? {
     name: asset.name,
     size: Number(asset.size) || 0,
-    downloadUrl: asset.browser_download_url,
+    downloadUrl: asset.browser_download_url || asset.download_url,
     digest: asset.digest || ''
   } : null;
 }
@@ -153,6 +175,7 @@ async function getReleaseFromPublicPage(repository, version) {
   const tag = tagMatch ? decodeURIComponent(tagMatch[1]) : `v${latestVersion}`;
   return {
     configured: true, repository, currentVersion: version, latestVersion,
+    source: 'github',
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: latestVersion,
     releaseUrl: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
@@ -162,9 +185,41 @@ async function getReleaseFromPublicPage(repository, version) {
   };
 }
 
+async function getGiteeUpdateInfo(repository, version) {
+  const response = await fetch(`https://gitee.com/api/v5/repos/${repository}/releases/latest`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'listagent-update-checker' }
+  });
+  if (!response.ok) {
+    if (response.status === 404) throw new Error(`Gitee 仓库或 Release 不存在：${repository}。`);
+    if (response.status === 403 || response.status === 429) throw new Error('Gitee 更新检查被限流，请稍后重试或切换 GitHub 源。');
+    throw new Error(`Gitee 更新检查失败（HTTP ${response.status}）。`);
+  }
+  const release = await response.json();
+  const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '') || version;
+  const asset = selectAsset(release.assets);
+  return {
+    configured: true, source: 'gitee', repository: '', giteeRepository: repository,
+    currentVersion: version, latestVersion,
+    updateAvailable: compareVersions(latestVersion, version) > 0,
+    releaseName: release.name || release.tag_name || latestVersion,
+    releaseUrl: release.html_url || `https://gitee.com/${repository}/releases/tag/${encodeURIComponent(release.tag_name || `v${latestVersion}`)}`,
+    publishedAt: release.published_at || release.created_at || '',
+    notes: String(release.body || '').slice(0, 4000),
+    // Gitee publishes the portable archive as a full package. Delta manifests
+    // remain a GitHub-only optimization because their raw file URLs point at GitHub.
+    mode: 'full', manifestAsset: null, asset: normalizeAsset(asset)
+  };
+}
+
 async function getUpdateInfo(settings = {}) {
-  const repository = configuredRepository(settings); const version = currentVersion();
-  if (!repository) return { configured: false, repository: '', currentVersion: version, updateAvailable: false };
+  const source = configuredUpdateSource(settings); const version = currentVersion();
+  if (source === 'gitee') {
+    const giteeRepository = configuredGiteeRepository(settings);
+    if (!giteeRepository) return { configured: false, source, repository: '', giteeRepository: '', currentVersion: version, updateAvailable: false };
+    return getGiteeUpdateInfo(giteeRepository, version);
+  }
+  const repository = configuredRepository(settings);
+  if (!repository) return { configured: false, source, repository: '', currentVersion: version, updateAvailable: false };
   const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'listagent-update-checker' }
   });
@@ -177,7 +232,7 @@ async function getUpdateInfo(settings = {}) {
   const manifestAsset = selectManifestAsset(release.assets); const asset = selectAsset(release.assets);
   const mode = manifestAsset && compareVersions(version, MIN_DELTA_CLIENT_VERSION) >= 0 ? 'delta' : 'full';
   return {
-    configured: true, repository, currentVersion: version, latestVersion,
+    configured: true, source, repository, currentVersion: version, latestVersion,
     updateAvailable: compareVersions(latestVersion, version) > 0,
     releaseName: release.name || release.tag_name || latestVersion,
     releaseUrl: release.html_url || `https://github.com/${repository}/releases`,
@@ -251,7 +306,7 @@ async function downloadDeltaUpdate(updateInfo, manifest, onProgress) {
 
 async function downloadFullArchive(updateInfo, onProgress) {
   const asset = updateInfo?.asset;
-  if (!asset?.downloadUrl || !isGithubUrl(asset.downloadUrl)) throw new Error('此版本没有可下载的 Windows 更新包。');
+  if (!asset?.downloadUrl || !(isGithubUrl(asset.downloadUrl) || isGiteeUrl(asset.downloadUrl))) throw new Error('此版本没有可下载的 Windows 更新包。');
   if (asset.size > MAX_DOWNLOAD_BYTES) throw new Error('更新包超过允许的大小限制。');
   fs.mkdirSync(UPDATE_DIR, { recursive: true });
   const filename = `listagent-${updateInfo.latestVersion || Date.now()}.zip`.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -271,6 +326,9 @@ async function downloadFullArchive(updateInfo, onProgress) {
 }
 
 async function downloadUpdate(updateInfo, onProgress) {
+  if (String(updateInfo?.source || '').toLowerCase() === 'gitee') {
+    return downloadFullArchive(updateInfo, onProgress);
+  }
   const supportsDelta = compareVersions(currentVersion(), MIN_DELTA_CLIENT_VERSION) >= 0;
   const manifest = supportsDelta ? await downloadManifest(updateInfo, onProgress) : null;
   if (manifest?.repository && normalizeRepository(manifest.repository) !== normalizeRepository(updateInfo?.repository)) throw new Error('更新清单与当前仓库不匹配。');
@@ -281,4 +339,8 @@ async function downloadUpdate(updateInfo, onProgress) {
   return downloadFullArchive(updateInfo, onProgress);
 }
 
-module.exports = { configuredRepository, compareVersions, currentVersion, safeRelativePath, createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION };
+module.exports = {
+  configuredRepository, configuredGiteeRepository, configuredUpdateSource,
+  normalizeGiteeRepository, compareVersions, currentVersion, safeRelativePath,
+  createDeltaPlan, getUpdateInfo, downloadUpdate, MIN_DELTA_CLIENT_VERSION
+};

@@ -10,6 +10,7 @@ const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const MAX_PERSONA_TEXT_LENGTH = 50000;
 const DEFAULT_UPDATE_REPOSITORY = 'qianchengst/listagent';
+const DEFAULT_GITEE_REPOSITORY = '';
 
 const DEFAULT_SETTINGS = Object.freeze({
   version: 2,
@@ -52,7 +53,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     skin: 'classic'
   },
   update: {
-    repository: DEFAULT_UPDATE_REPOSITORY
+    repository: DEFAULT_UPDATE_REPOSITORY,
+    source: 'github',
+    giteeRepository: DEFAULT_GITEE_REPOSITORY
   },
   automation: {
     enabled: false,
@@ -92,6 +95,8 @@ function mergeSettings(saved = {}) {
   } else {
     result.update.repository = String(result.update.repository).trim().slice(0, 200);
   }
+  result.update.source = String(result.update.source || '').toLowerCase() === 'gitee' ? 'gitee' : 'github';
+  result.update.giteeRepository = String(result.update.giteeRepository || '').trim().slice(0, 200);
   // Migrate the former single scale slider and clamp all display scales to
   // the supported 20%–200% range.
   const savedPet = saved.pet && typeof saved.pet === 'object' ? saved.pet : {};
@@ -251,6 +256,8 @@ function saveSettings(patch) {
 
   if (input.update && typeof input.update === 'object') {
     if (typeof input.update.repository === 'string') next.update.repository = input.update.repository.trim().slice(0, 200);
+    if (typeof input.update.source === 'string') next.update.source = input.update.source.toLowerCase() === 'gitee' ? 'gitee' : 'github';
+    if (typeof input.update.giteeRepository === 'string') next.update.giteeRepository = input.update.giteeRepository.trim().slice(0, 200);
   }
 
   if (input.automation && typeof input.automation === 'object') {
@@ -465,6 +472,11 @@ function toPublicSettings(settings = readSettings()) {
       moving: toPublicPetAsset(copy.pet.movingAssetPath),
       rest: toPublicPetAsset(copy.pet.restAssetPath),
       deleteAnimation: toPublicPetAsset(copy.pet.deleteAnimationAssetPath)
+    },
+    update: {
+      repository: copy.update.repository,
+      source: copy.update.source,
+      giteeRepository: copy.update.giteeRepository
     }
   };
 }

@@ -1110,6 +1110,11 @@
       el('#temperature').value = config.api.temperature;
       el('#temperature-output').value = config.api.temperature;
       el('#update-repository').value = config.update?.repository || '';
+      el('#gitee-repository').value = config.update?.giteeRepository || '';
+      const updateSource = config.update?.source === 'gitee' ? 'gitee' : 'github';
+      document.querySelectorAll('input[name="update-source"]').forEach((input) => {
+        input.checked = input.value === updateSource;
+      });
       el('#text-key-state').textContent = config.api.textApiKeySet ? '文本 API Key 已保存（为安全起见不回显）' : '文本 API Key 尚未保存';
       el('#vision-key-state').textContent = config.api.visionApiKeySet ? '视觉 API Key 已保存（为安全起见不回显）' : '视觉 API Key 尚未保存';
       el('#automation-enabled').checked = config.automation.enabled;
@@ -1375,7 +1380,11 @@
           visionApiKey: el('#api-vision-key').value,
           temperature: Number(el('#temperature').value)
         },
-        update: { repository: el('#update-repository').value }
+        update: {
+          repository: el('#update-repository').value,
+          source: document.querySelector('input[name="update-source"]:checked')?.value || 'github',
+          giteeRepository: el('#gitee-repository').value
+        }
       });
       el('#api-text-key').value = '';
       el('#api-vision-key').value = '';
@@ -1442,15 +1451,21 @@
         updateProgress.textContent = '';
         updateProgress.dataset.state = '';
       }
-      status.textContent = '正在检查 GitHub 更新…';
+      const selectedSource = document.querySelector('input[name="update-source"]:checked')?.value === 'gitee' ? 'gitee' : 'github';
+      const sourceLabel = selectedSource === 'gitee' ? 'Gitee' : 'GitHub';
+      status.textContent = `正在检查 ${sourceLabel} 更新…`;
       try {
         const result = await api.checkForUpdates();
         if (!result.configured) {
-          status.textContent = '请先填写 GitHub 更新仓库，例如 your-name/listagent。';
+          status.textContent = selectedSource === 'gitee'
+            ? '请先填写 Gitee 更新仓库，例如 your-name/listagent。'
+            : '请先填写 GitHub 更新仓库，例如 your-name/listagent。';
         } else if (!result.updateAvailable) {
           status.textContent = `当前已是最新版本 v${result.currentVersion}。`;
         } else {
-          const modeHint = result.mode === 'delta' ? '安装时只下载变化的程序文件' : '该 Release 没有增量清单，将下载完整包';
+          const modeHint = result.mode === 'delta'
+            ? '安装时只下载变化的程序文件'
+            : result.source === 'gitee' ? '安装时将下载 Gitee 完整便携包' : '该 Release 没有增量清单，将下载完整包';
           status.textContent = `发现新版本 v${result.latestVersion}，${modeHint}。点击“立即更新”。`;
           install.hidden = false;
         }
@@ -1462,7 +1477,8 @@
       const status = el('#update-status');
       const button = el('#install-update');
       button.disabled = true;
-      status.textContent = '正在获取更新清单并下载变化文件，完成后会自动重启…';
+      const installSource = document.querySelector('input[name="update-source"]:checked')?.value === 'gitee' ? 'Gitee' : 'GitHub';
+      status.textContent = `正在从 ${installSource} 下载更新，完成后会自动重启…`;
       renderUpdateProgress({ phase: 'starting', downloaded: 0, total: 0 });
       try {
         await api.installUpdate();

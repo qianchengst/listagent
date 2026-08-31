@@ -4,13 +4,25 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { safeRelativePath, createDeltaPlan, compareVersions, MIN_DELTA_CLIENT_VERSION } = require('../src/update-service');
+const {
+  safeRelativePath, createDeltaPlan, compareVersions, MIN_DELTA_CLIENT_VERSION,
+  normalizeGiteeRepository, configuredGiteeRepository, configuredUpdateSource
+} = require('../src/update-service');
 
 test('delta updates start with v0.2.9 clients', () => {
   assert.equal(MIN_DELTA_CLIENT_VERSION, '0.2.9');
   assert.equal(compareVersions('0.2.8', MIN_DELTA_CLIENT_VERSION), -1);
   assert.equal(compareVersions('0.2.9', MIN_DELTA_CLIENT_VERSION), 0);
   assert.equal(compareVersions('0.2.10', MIN_DELTA_CLIENT_VERSION), 1);
+});
+
+test('Gitee update repositories and source selection are normalized safely', () => {
+  assert.equal(normalizeGiteeRepository('https://gitee.com/demo/listagent.git'), 'demo/listagent');
+  assert.equal(normalizeGiteeRepository('demo/listagent'), 'demo/listagent');
+  assert.equal(normalizeGiteeRepository('https://github.com/demo/listagent'), '');
+  assert.equal(configuredGiteeRepository({ update: { giteeRepository: 'demo/listagent' } }), 'demo/listagent');
+  assert.equal(configuredUpdateSource({ update: { source: 'gitee' } }), 'gitee');
+  assert.equal(configuredUpdateSource({ update: { source: 'anything-else' } }), 'github');
 });
 
 test('incremental update paths stay inside the packaged application surface', () => {

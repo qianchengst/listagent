@@ -69,3 +69,14 @@ npm start
 ## GitHub 更新
 
 在控制面板“连接”页面填写公开仓库的 `owner/repository`，即可检查 GitHub Releases 并一键更新；新安装和历史空白配置会自动填入 `qianchengst/listagent`。点击更新后，按钮右侧会显示累计下载量（已下载 MB / 总计 MB）。`v0.2.9` 是兼容过渡版本，仅发布完整便携包；从 `v0.2.10` 起每个 Release 同时发布完整包和 `listagent-update-manifest.json` 增量清单。`0.2.9` 之前的客户端始终识别并下载完整包，`0.2.9` 及之后的客户端优先使用增量清单，缺少清单或 Electron 运行时变化时才回退完整包。更新会保留每位使用者的 `data`、`.runtime`、模型和本地素材。发布新版本时推送形如 `v0.2.1` 的标签，GitHub Actions 会按版本策略自动构建并发布相应资产。
+
+### Gitee 国内源与自动同步
+
+“连接”页面可以在“国内源（Gitee）/国外源（GitHub）”之间切换。Gitee 源读取 `https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest`，并下载 Release 中的 Windows 完整包；GitHub 源保留增量更新能力。使用 Gitee 源时，在“Gitee 更新仓库”填写 `owner/repository`。
+
+要启用发布同步，在 GitHub 仓库的 Settings → Secrets and variables → Actions 中配置：
+
+- Actions secret `GITEE_TOKEN`：具有目标 Gitee 仓库写入权限的个人令牌；
+- Actions variables `GITEE_OWNER`、`GITEE_REPOSITORY`：目标 Gitee 用户/组织和仓库名。
+
+`.github/workflows/gitee-mirror.yml` 会在 `main` 或版本标签更新时镜像分支和标签；`.github/workflows/release.yml` 在 GitHub Release 完成后自动创建/更新同名 Gitee Release，并上传完整包（以及可选的增量清单）。未配置这些变量时同步步骤会安全跳过，不影响 GitHub 发布。令牌只存在于 GitHub Actions secret，不写入代码或应用设置。
