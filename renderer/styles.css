@@ -43,6 +43,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .bubble-message { max-width: 88%; padding: 8px 10px; border-radius: 11px; color: #e9ebf8; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .bubble-message.assistant { justify-self: start; background: rgba(151, 133, 255, .16); }
 .bubble-message.user { justify-self: end; background: rgba(86, 183, 127, .18); }
+.bubble-message.editable-user-message { cursor: context-menu; transition: box-shadow .15s ease, background .15s ease; }
+.bubble-message.editable-user-message:hover { background: rgba(86, 183, 127, .28); }
+.bubble-message.editable-user-message.editing-message { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .bubble-message.error { justify-self: start; color: #ffc6c2; background: rgba(220, 96, 91, .16); }
 .bubble-message.thinking-message { display: inline-flex; align-items: center; width: max-content; min-height: 32px; }
 .bubble-composer { display: flex; gap: 7px; padding: 8px; border-top: 1px solid rgba(205, 209, 255, .1); }
@@ -87,6 +90,36 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .avatar-image[hidden] { display: none; }
 .avatar.has-avatar .avatar-glyph, .avatar.has-avatar .avatar-mark { display: none !important; }
 .bubble { padding: 11px 13px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; border: 1px solid var(--line); background: #1c2030; border-radius: 4px 13px 13px 13px; }
+.message.user .editable-user-message { cursor: context-menu; transition: box-shadow .15s ease, background .15s ease; }
+.message.user .editable-user-message:hover { background: #252a40; }
+.message.user .editable-user-message.editing-message { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.message-context-menu {
+  position: fixed;
+  z-index: 3000;
+  display: grid;
+  min-width: 88px;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .34);
+}
+.message-context-menu button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+.message-context-menu button:hover, .message-context-menu button:focus-visible {
+  color: var(--ink);
+  background: rgba(151, 133, 255, .18);
+  outline: none;
+}
 .bubble.thinking-indicator { display: inline-flex; align-items: center; justify-content: center; min-width: 61px; min-height: 40px; }
 .thinking-indicator { color: currentColor; }
 .thinking-dots { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 10px; }

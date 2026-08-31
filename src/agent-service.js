@@ -58,6 +58,19 @@ function getSession(sessionId = 'default') {
   return sessions.get(sessionId);
 }
 
+// The renderer needs a stable, visible-message position so a user can act on
+// one turn without exposing the internal tool-call messages kept in history.
+// Keep the raw index alongside that position so pair deletion can remove the
+// complete turn (including any hidden tool messages in between).
+function getVisibleSessionEntries(session) {
+  let historyIndex = 0;
+  return session.map((message, rawIndex) => {
+    const content = messageText(message?.content);
+    if (message?.visible === false || !['user', 'assistant'].includes(message?.role) || !content.trim()) return null;
+    return { message, rawIndex, historyIndex: historyIndex++, content };
+  }).filter(Boolean);
+}
+
 function makeSystemMessage(settings) {
   const persona = settings.persona || {};
   const personaName = String(persona.name || '桌宠').trim();
@@ -114,10 +127,23 @@ function trimSession(session) {
 
 function getSessionHistory(sessionId = 'default') {
   const session = getSession(sessionId);
-  return session
-    .filter((message) => message?.visible !== false && ['user', 'assistant'].includes(message.role))
-    .map((message) => ({ role: message.role, content: messageText(message.content) }))
-    .filter((message) => message.content.trim());
+  return getVisibleSessionEntries(session)
+    .map(({ message, historyIndex, content }) => ({ role: message.role, content, historyIndex }));
+}
+
+function removeConversationPair(historyIndex, sessionId = 'default') {
+  const numericIndex = Number(historyIndex);
+  if (!Number.isInteger(numericIndex) || numericIndex < 0) throw new Error('无效的消息位置。');
+  const session = getSession(sessionId);
+  const visible = getVisibleSessionEntries(session);
+  const targetPosition = visible.findIndex((entry) => entry.historyIndex === numericIndex);
+  const target = visible[targetPosition];
+  if (!target || target.message.role !== 'user') throw new Error('只能删除用户发送的消息。');
+  const following = visible[targetPosition + 1];
+  const end = following?.message.role === 'assistant' ? following : target;
+  session.splice(target.rawIndex, end.rawIndex - target.rawIndex + 1);
+  persistSessions();
+  return getSessionHistory(sessionId);
 }
 
 function recordGreeting(greeting, sessionId = 'default') {
@@ -1030,10 +1056,12 @@ function addWechatObservationToSession(session, observation) {
   });
 }
 
-async function chat(settings, userText, sessionId = 'default') {
+async function chat(settings, userText, sessionId = 'default', options = {}) {
   const text = typeof userText === 'string' ? userText.trim() : '';
   if (!text) throw new Error('请输入一条消息。');
   if (text.length > 8000) throw new Error('消息不能超过 8000 个字符。');
+  const editHistoryIndex = Number(options?.editHistoryIndex);
+  if (Number.isInteger(editHistoryIndex) && editHistoryIndex >= 0) removeConversationPair(editHistoryIndex, sessionId);
   const session = getSession(sessionId);
   session.push({ role: 'user', content: text });
   trimSession(session);
@@ -1263,4 +1291,4 @@ function clearSession(sessionId = 'default') {
   persistSessions();
 }
 
-module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getSessionHistory, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
+module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getSessionHistory, removeConversationPair, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };

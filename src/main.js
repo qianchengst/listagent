@@ -12,7 +12,7 @@ const {
   saveSettings,
   toPublicSettings
 } = require('./settings-service');
-const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getModelUsageTotals, getSessionHistory, recordGreeting } = require('./agent-service');
+const { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getModelUsageTotals, getSessionHistory, removeConversationPair, recordGreeting } = require('./agent-service');
 const { finishSession, getRecord: getCompanionRecord, recordConversation, recordModelUsage, recordMovement, startSession } = require('./companion-record-service');
 const { getWeChatStatus, captureWeChatWindow, sendTextToActiveWeChat } = require('./automation-service');
 const { detectWeChatBubble, stopWorker } = require('./yolo-service');
@@ -1595,8 +1595,8 @@ function registerIpc() {
   });
   ipcMain.handle('pet:perch', () => runTask(() => perchPetOnTopmostWindow()));
   ipcMain.on('pet:scale', (_event, scale) => resizePetWindow(scale));
-  ipcMain.handle('agent:chat', (_event, text) => runTask(async () => {
-    const answer = await chat(readSettings(), text);
+  ipcMain.handle('agent:chat', (_event, text, options) => runTask(async () => {
+    const answer = await chat(readSettings(), text, 'default', options && typeof options === 'object' ? options : {});
     recordConversation();
     broadcastCompanionRecord();
     if (answer.actions?.length) openConfirmationWindow(answer.actions);
@@ -1608,6 +1608,12 @@ function registerIpc() {
     return greeting;
   });
   ipcMain.handle('agent:history', () => getSessionHistory());
+  ipcMain.handle('agent:remove-message', (_event, historyIndex) => {
+    const history = removeConversationPair(historyIndex);
+    sendChatHistory(consoleWindow);
+    sendChatHistory(bubbleWindow);
+    return history;
+  });
   ipcMain.handle('companion:record', () => broadcastCompanionRecord());
   ipcMain.handle('agent:record-greeting', (_event, greeting) => {
     const history = recordGreeting(greeting);

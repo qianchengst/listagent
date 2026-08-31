@@ -15,6 +15,63 @@
     return remaining ? new Promise((resolve) => setTimeout(resolve, remaining)) : Promise.resolve();
   }
 
+  let activeMessageContextMenu;
+  let activeMessageContextCleanup;
+  function closeMessageContextMenu() {
+    activeMessageContextCleanup?.();
+    activeMessageContextCleanup = undefined;
+    activeMessageContextMenu?.remove();
+    activeMessageContextMenu = undefined;
+  }
+
+  function openMessageContextMenu(event, target, { onEdit, onDelete } = {}) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMessageContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'message-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.addEventListener('contextmenu', (menuEvent) => menuEvent.preventDefault());
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = '修改';
+    edit.setAttribute('role', 'menuitem');
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '删除';
+    remove.setAttribute('role', 'menuitem');
+    edit.addEventListener('click', () => {
+      closeMessageContextMenu();
+      onEdit?.(target);
+    });
+    remove.addEventListener('click', () => {
+      closeMessageContextMenu();
+      onDelete?.(target);
+    });
+    menu.append(edit, remove);
+    document.body.append(menu);
+    const width = menu.offsetWidth || 112;
+    const height = menu.offsetHeight || 76;
+    const left = Math.min(Math.max(8, event.clientX), Math.max(8, window.innerWidth - width - 8));
+    const top = Math.min(Math.max(8, event.clientY), Math.max(8, window.innerHeight - height - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    const outside = (nextEvent) => {
+      if (!menu.contains(nextEvent.target)) closeMessageContextMenu();
+    };
+    const escape = (nextEvent) => {
+      if (nextEvent.key === 'Escape') closeMessageContextMenu();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape, true);
+    activeMessageContextMenu = menu;
+    activeMessageContextCleanup = () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('keydown', escape, true);
+    };
+    edit.focus();
+  }
+
   function renderMedia(image, video, emptyState, media) {
     const asset = media && media.url ? media : null;
     image.hidden = true;
@@ -307,11 +364,85 @@
     let historyRevision = 0;
     let historyReady = false;
     let pendingHistory;
+    let nextHistoryIndex = 0;
+    let editingMessage;
     const scroll = () => { messages.scrollTop = messages.scrollHeight; };
-    const addMessage = (role, text) => {
+    const refillInput = (text) => {
+      input.value = String(text || '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
+    const removeRenderedPair = (target) => {
+      if (!target || !target.isConnected) return;
+      let next = target.nextElementSibling;
+      target.remove();
+      while (next) {
+        const candidate = next;
+        next = candidate.nextElementSibling;
+        if (candidate.dataset.persisted === 'true') {
+          if (candidate.classList.contains('assistant')) candidate.remove();
+          break;
+        }
+      }
+    };
+    const syncHistoryIndexes = async () => {
+      try {
+        const history = await api.getChatHistory();
+        const entries = Array.isArray(history) ? history : [];
+        const nodes = [...messages.children].filter((item) => item.dataset.persisted === 'true');
+        nextHistoryIndex = 0;
+        entries.forEach((entry, index) => {
+          const node = nodes[index];
+          if (!node) return;
+          const historyIndex = Number.isInteger(Number(entry.historyIndex)) ? Number(entry.historyIndex) : index;
+          node.dataset.historyIndex = String(historyIndex);
+          nextHistoryIndex = Math.max(nextHistoryIndex, historyIndex + 1);
+        });
+      } catch { /* best effort; the active transcript remains usable. */ }
+    };
+    const addMessage = (role, text, options = {}) => {
       const item = document.createElement('div');
       item.className = `bubble-message ${role}`;
-      item.textContent = text;
+      const messageText = String(text || '');
+      item.textContent = messageText;
+      const persisted = options.persisted !== false && ['user', 'assistant'].includes(role);
+      if (persisted) {
+        const suppliedIndex = Number(options.historyIndex);
+        const historyIndex = Number.isInteger(suppliedIndex) && suppliedIndex >= 0 ? suppliedIndex : nextHistoryIndex;
+        item.dataset.persisted = 'true';
+        item.dataset.historyIndex = String(historyIndex);
+        nextHistoryIndex = Math.max(nextHistoryIndex, historyIndex + 1);
+      } else {
+        item.dataset.persisted = 'false';
+      }
+      if (role === 'user') {
+        item.classList.add('editable-user-message');
+        item.title = '右键选择修改或删除';
+        item.addEventListener('contextmenu', (event) => {
+          const historyIndex = Number(item.dataset.historyIndex);
+          if (!Number.isInteger(historyIndex)) return;
+          openMessageContextMenu(event, item, {
+            onEdit: () => {
+              if (sending) return;
+              editingMessage?.element?.classList.remove('editing-message');
+              editingMessage = { historyIndex, element: item };
+              item.classList.add('editing-message');
+              refillInput(messageText);
+            },
+            onDelete: async () => {
+              if (sending) return;
+              editingMessage = undefined;
+              try {
+                const history = await api.removeChatMessage(historyIndex);
+                replaceHistory(history);
+              } catch (error) {
+                addMessage('error', `删除消息失败：${error.message}`, { persisted: false });
+              }
+            }
+          });
+        });
+      }
       messages.append(item);
       scroll();
       return item;
@@ -320,7 +451,7 @@
       thinkingCount += 1;
       if (thinkingItem) return;
       initialGreeting.hidden = true;
-      thinkingItem = addMessage('assistant', '');
+      thinkingItem = addMessage('assistant', '', { persisted: false });
       thinkingItem.classList.add('thinking-message');
       thinkingItem.classList.add('thinking-indicator');
       thinkingItem.setAttribute('role', 'status');
@@ -335,7 +466,9 @@
     };
     const renderHistory = (history) => {
       (Array.isArray(history) ? history : []).forEach((message) => {
-        if (message?.role === 'user' || message?.role === 'assistant') addMessage(message.role, message.content || '');
+        if (message?.role === 'user' || message?.role === 'assistant') {
+          addMessage(message.role, message.content || '', { historyIndex: message.historyIndex });
+        }
       });
     };
     const replaceHistory = (history) => {
@@ -345,6 +478,9 @@
       }
       const wasThinking = Boolean(thinkingItem);
       historyRevision += 1;
+      nextHistoryIndex = 0;
+      editingMessage = undefined;
+      closeMessageContextMenu();
       [...messages.children].forEach((item) => {
         if (item !== initialGreeting) item.remove();
       });
@@ -364,14 +500,14 @@
       const text = typeof payload === 'string' ? payload : payload?.text;
       if (!text) return;
       initialGreeting.hidden = true;
-      const item = addMessage('assistant', String(text).trim());
+      const item = addMessage('assistant', String(text).trim(), { persisted: false });
       item.classList.add('wellbeing-message');
     });
     api.onPlanReminder((payload) => {
       const text = typeof payload === 'string' ? payload : payload?.text;
       if (!text) return;
       initialGreeting.hidden = true;
-      const item = addMessage('assistant', String(text).trim());
+      const item = addMessage('assistant', String(text).trim(), { persisted: false });
       item.classList.add('plan-reminder-message');
     });
     try {
@@ -408,18 +544,25 @@
     async function submit() {
       const text = input.value.trim();
       if (!text || sending) return;
+      const editTarget = editingMessage;
+      editingMessage = undefined;
+      editTarget?.element?.classList.remove('editing-message');
       sending = true;
       input.value = '';
       send.disabled = true;
+      if (editTarget) removeRenderedPair(editTarget.element);
       addMessage('user', text);
       showThinking();
       try {
-        const answer = await api.chat(text);
+        const answer = editTarget
+          ? await api.chat(text, { editHistoryIndex: editTarget.historyIndex })
+          : await api.chat(text);
         if (answer.content) addMessage('assistant', answer.content);
-        if (answer.actions?.length) addMessage('assistant', '确认弹窗已打开，请在弹窗中选择是否执行。');
-        if (!answer.content && !answer.actions?.length) addMessage('assistant', '我暂时没有得到可显示的回复。');
+        if (answer.actions?.length) addMessage('assistant', '确认弹窗已打开，请在弹窗中选择是否执行。', { persisted: false });
+        if (!answer.content && !answer.actions?.length) addMessage('assistant', '我暂时没有得到可显示的回复。', { persisted: false });
+        if (editTarget) await syncHistoryIndexes();
       } catch (error) {
-        addMessage('error', `抱歉，无法完成这次请求：${error.message}`);
+        addMessage('error', `抱歉，无法完成这次请求：${error.message}`, { persisted: false });
       } finally {
         hideThinking();
         sending = false;
@@ -535,6 +678,16 @@
     let historyRevision = 0;
     let historyReady = false;
     let pendingHistory;
+    let nextHistoryIndex = 0;
+    let editingMessage;
+    const refillInput = (text) => {
+      const input = el('#chat-input');
+      if (!input) return;
+      input.value = String(text || '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
     const recordSessionDuration = el('#record-session-duration');
     const recordLifetimeDuration = el('#record-lifetime-duration');
     const recordSessionCount = el('#record-session-count');
@@ -1023,9 +1176,51 @@
       messages.scrollTop = messages.scrollHeight;
     }
 
-    function addMessage(role, text) {
+    function removeRenderedPair(target) {
+      const row = target?.closest?.('.message') || target;
+      if (!row || !row.isConnected) return;
+      let next = row.nextElementSibling;
+      row.remove();
+      while (next) {
+        const candidate = next;
+        next = candidate.nextElementSibling;
+        if (candidate.dataset.persisted === 'true') {
+          if (candidate.classList.contains('assistant')) candidate.remove();
+          break;
+        }
+      }
+    }
+
+    async function syncHistoryIndexes() {
+      try {
+        const history = await api.getChatHistory();
+        const entries = Array.isArray(history) ? history : [];
+        const nodes = [...messages.children].filter((row) => row.dataset.persisted === 'true');
+        nextHistoryIndex = 0;
+        entries.forEach((entry, index) => {
+          const row = nodes[index];
+          if (!row) return;
+          const historyIndex = Number.isInteger(Number(entry.historyIndex)) ? Number(entry.historyIndex) : index;
+          row.dataset.historyIndex = String(historyIndex);
+          row.querySelector('.bubble')?.setAttribute('data-history-index', String(historyIndex));
+          nextHistoryIndex = Math.max(nextHistoryIndex, historyIndex + 1);
+        });
+      } catch { /* best effort; the active transcript remains usable. */ }
+    }
+
+    function addMessage(role, text, options = {}) {
       const row = document.createElement('div');
       row.className = `message ${role}`;
+      const persisted = options.persisted !== false && ['user', 'assistant'].includes(role);
+      if (persisted) {
+        const suppliedIndex = Number(options.historyIndex);
+        const historyIndex = Number.isInteger(suppliedIndex) && suppliedIndex >= 0 ? suppliedIndex : nextHistoryIndex;
+        row.dataset.persisted = 'true';
+        row.dataset.historyIndex = String(historyIndex);
+        nextHistoryIndex = Math.max(nextHistoryIndex, historyIndex + 1);
+      } else {
+        row.dataset.persisted = 'false';
+      }
       if (role === 'assistant') {
         const avatar = document.createElement('div');
         avatar.className = 'avatar';
@@ -1035,7 +1230,36 @@
       }
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.textContent = text;
+      const messageText = String(text || '');
+      bubble.textContent = messageText;
+      if (persisted) bubble.dataset.historyIndex = row.dataset.historyIndex;
+      if (role === 'user') {
+        bubble.classList.add('editable-user-message');
+        bubble.title = '右键选择修改或删除';
+        bubble.addEventListener('contextmenu', (event) => {
+          const historyIndex = Number(bubble.dataset.historyIndex);
+          if (!Number.isInteger(historyIndex)) return;
+          openMessageContextMenu(event, bubble, {
+            onEdit: () => {
+              if (sending) return;
+              editingMessage?.element?.classList.remove('editing-message');
+              editingMessage = { historyIndex, element: bubble };
+              bubble.classList.add('editing-message');
+              refillInput(messageText);
+            },
+            onDelete: async () => {
+              if (sending) return;
+              editingMessage = undefined;
+              try {
+                const history = await api.removeChatMessage(historyIndex);
+                replaceHistory(history);
+              } catch (error) {
+                addMessage('error', `删除消息失败：${error.message}`, { persisted: false });
+              }
+            }
+          });
+        });
+      }
       row.append(bubble);
       messages.append(row);
       scrollMessages();
@@ -1046,7 +1270,7 @@
       thinkingCount += 1;
       if (thinkingItem) return;
       initialGreetingRow.hidden = true;
-      thinkingItem = addMessage('assistant', '');
+      thinkingItem = addMessage('assistant', '', { persisted: false });
       thinkingItem.classList.add('thinking-message');
       const bubble = thinkingItem.querySelector('.bubble');
       bubble.classList.add('thinking-indicator');
@@ -1064,7 +1288,9 @@
 
     function renderHistory(history) {
       (Array.isArray(history) ? history : []).forEach((message) => {
-        if (message?.role === 'user' || message?.role === 'assistant') addMessage(message.role, message.content || '');
+        if (message?.role === 'user' || message?.role === 'assistant') {
+          addMessage(message.role, message.content || '', { historyIndex: message.historyIndex });
+        }
       });
     }
 
@@ -1075,6 +1301,9 @@
       }
       const wasThinking = Boolean(thinkingItem);
       historyRevision += 1;
+      nextHistoryIndex = 0;
+      editingMessage = undefined;
+      closeMessageContextMenu();
       [...messages.children].forEach((row) => {
         if (row !== initialGreetingRow) row.remove();
       });
@@ -1095,19 +1324,26 @@
       const input = el('#chat-input');
       const text = input.value.trim();
       if (!text || sending) return;
+      const editTarget = editingMessage;
+      editingMessage = undefined;
+      editTarget?.element?.classList.remove('editing-message');
       sending = true;
       input.value = '';
       input.style.height = 'auto';
       el('#send').disabled = true;
+      if (editTarget) removeRenderedPair(editTarget.element);
       addMessage('user', text);
       showThinking();
       try {
-        const answer = await api.chat(text);
+        const answer = editTarget
+          ? await api.chat(text, { editHistoryIndex: editTarget.historyIndex })
+          : await api.chat(text);
         if (answer.content) addMessage('assistant', answer.content);
-        if (!answer.content && (!answer.actions || answer.actions.length === 0)) addMessage('assistant', '我暂时没有得到可显示的回复。');
-        if (answer.actions?.length) addMessage('assistant', '确认弹窗已打开，请在弹窗中选择是否执行。');
+        if (!answer.content && (!answer.actions || answer.actions.length === 0)) addMessage('assistant', '我暂时没有得到可显示的回复。', { persisted: false });
+        if (answer.actions?.length) addMessage('assistant', '确认弹窗已打开，请在弹窗中选择是否执行。', { persisted: false });
+        if (editTarget) await syncHistoryIndexes();
       } catch (error) {
-        addMessage('assistant', `抱歉，无法完成这次请求：${error.message}`);
+        addMessage('assistant', `抱歉，无法完成这次请求：${error.message}`, { persisted: false });
       } finally {
         hideThinking();
         sending = false;
@@ -1189,7 +1425,10 @@
     el('#clear-chat').addEventListener('click', async () => {
       await api.clearChat();
       messages.innerHTML = '';
-      addMessage('assistant', '本次对话已清空。我们重新开始吧。');
+      nextHistoryIndex = 0;
+      editingMessage = undefined;
+      closeMessageContextMenu();
+      addMessage('assistant', '本次对话已清空。我们重新开始吧。', { persisted: false });
     });
     document.querySelector('[data-save="persona"]').addEventListener('click', savePersona);
     el('#choose-persona-avatar').addEventListener('click', choosePersonaAvatar);
@@ -1511,7 +1750,7 @@
       await keepThinkingVisible(thinkingStartedAt);
       if (greeting) {
         initialGreetingRow.hidden = true;
-        addMessage('assistant', greeting);
+        addMessage('assistant', greeting, { persisted: false });
       } else {
         initialGreetingRow.hidden = !hadHistory;
       }
