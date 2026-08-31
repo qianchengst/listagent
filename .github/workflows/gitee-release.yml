@@ -1,0 +1,64 @@
+name: Sync selected GitHub Release to Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag to synchronize (for example v0.2.14)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Gitee Release configuration
+        id: config
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
+        shell: pwsh
+        run: |
+          $ownerOk = $env:GITEE_OWNER -match '^[A-Za-z0-9_.-]+$'
+          $repositoryOk = $env:GITEE_REPOSITORY -match '^[A-Za-z0-9_.-]+$'
+          $enabled = -not [string]::IsNullOrWhiteSpace($env:GITEE_TOKEN) -and $ownerOk -and $repositoryOk
+          "enabled=$($enabled.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $enabled) { throw '请先配置 GITEE_TOKEN、GITEE_OWNER 和 GITEE_REPOSITORY。' }
+
+      - name: Download GitHub Release assets
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern listagent-windows-x64.zip --dir release-assets --clobber
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern listagent-update-manifest.json --dir release-assets --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Host '该 Release 没有增量清单，仅同步完整包。' }
+          if (-not (Test-Path -LiteralPath 'release-assets/listagent-windows-x64.zip')) { throw 'GitHub Release 中没有 Windows 完整包。' }
+
+      - name: Sync assets to Gitee
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: pwsh
+        run: |
+          $releaseName = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json name --jq .name
+          $releaseBody = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json body --jq .body
+          $files = @((Resolve-Path 'release-assets/listagent-windows-x64.zip').Path)
+          if (Test-Path -LiteralPath 'release-assets/listagent-update-manifest.json') {
+            $files += (Resolve-Path 'release-assets/listagent-update-manifest.json').Path
+          }
+          ./scripts/sync-gitee-release.ps1 -Owner $env:GITEE_OWNER -Repository $env:GITEE_REPOSITORY -Tag $env:RELEASE_TAG -Name $releaseName -Body $releaseBody -Files $files

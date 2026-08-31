@@ -80,3 +80,5 @@ npm start
 - Actions variables `GITEE_OWNER`、`GITEE_REPOSITORY`：目标 Gitee 用户/组织和仓库名。
 
 `.github/workflows/gitee-mirror.yml` 会在 `main` 或版本标签更新时镜像分支和标签；`.github/workflows/release.yml` 在 GitHub Release 完成后自动创建/更新同名 Gitee Release，并上传完整包（以及可选的增量清单）。未配置这些变量时同步步骤会安全跳过，不影响 GitHub 发布。令牌只存在于 GitHub Actions secret，不写入代码或应用设置。
+
+已有的 GitHub Release 可在 Actions 中手动运行 `Sync selected GitHub Release to Gitee`，填入版本标签进行一次性补发；以后推送版本标签即可自动同步。
