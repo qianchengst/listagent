@@ -307,102 +307,105 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .rest-mode-card h2 { margin: 0; color: var(--ink); font-size: 15px; }
 .rest-mode-card p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 
-/* 自动化控制台：参考桌面工具的“左侧分区 + 右侧工作区”模式，
-   让权限、窗口、通知和工具各自拥有明确入口，避免设置堆叠在一列。 */
-#panel-automation {
-  --auto-bg: #1b1d1f;
-  --auto-sidebar: #17191b;
-  --auto-panel: #202225;
-  --auto-panel-raised: #25272a;
-  --auto-line: #41454b;
-  --auto-line-soft: #303338;
-  --auto-ink: #eceef0;
-  --auto-muted: #a4a8ae;
-  --auto-subtle: #777d85;
-  --auto-accent: #2b9be5;
-  --auto-accent-soft: rgba(43, 155, 229, .15);
-  color: var(--auto-ink);
-  padding-top: 27px;
-  padding-bottom: 23px;
+/* 自动化控制台：保留参考图的“左侧书签 + 右侧长文档”模式，
+   颜色、卡片、按钮和圆角交由当前皮肤的既有规则决定。 */
+#panel-automation { padding-top: 38px; }
+#panel-automation .automation-console {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - 145px);
+  max-width: 1100px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
 }
-#panel-automation .automation-header { margin-bottom: 18px; }
-#panel-automation .automation-header h1 { color: var(--auto-ink); font-size: 25px; letter-spacing: -.035em; }
-#panel-automation .automation-subtitle { margin: 6px 0 0; color: var(--auto-muted); font-size: 12px; }
-.automation-health { display: inline-flex; align-items: center; gap: 8px; color: var(--auto-muted); font-size: 11px; white-space: nowrap; }
-.automation-health-dot, .automation-footer-dot { width: 7px; height: 7px; border-radius: 50%; background: #70c397; box-shadow: 0 0 0 4px rgba(112, 195, 151, .1); }
-.automation-console { display: grid; grid-template-columns: 208px minmax(0, 1fr); flex: 1; min-height: 0; max-width: 1100px; overflow: hidden; border: 1px solid var(--auto-line); border-radius: 5px; background: var(--auto-bg); }
-.automation-sidebar { display: flex; min-height: 0; flex-direction: column; padding: 14px 10px 12px; border-right: 1px solid var(--auto-line); background: var(--auto-sidebar); }
-.automation-search { display: flex; align-items: center; gap: 8px; height: 35px; padding: 0 10px; border: 1px solid var(--auto-line); border-radius: 4px; color: var(--auto-subtle); background: #1d1f21; }
-.automation-search:focus-within { border-color: var(--auto-accent); box-shadow: 0 0 0 2px rgba(43, 155, 229, .14); }
-.automation-search svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-.automation-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--auto-ink); background: transparent; font-size: 12px; }
-.automation-search input::placeholder { color: var(--auto-subtle); }
-.automation-subnav { display: grid; gap: 3px; margin-top: 14px; }
-.automation-subnav-item { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; min-height: 47px; padding: 8px 10px; border: 1px solid transparent; border-radius: 3px; color: var(--auto-muted); background: transparent; text-align: left; transition: background .16s ease, border-color .16s ease, color .16s ease; }
-.automation-subnav-item span { font-size: 13px; }
-.automation-subnav-item small { color: var(--auto-subtle); font-size: 10px; white-space: nowrap; }
-.automation-subnav-item:hover { color: var(--auto-ink); border-color: var(--auto-line-soft); background: rgba(255, 255, 255, .04); }
-.automation-subnav-item.active { color: var(--auto-ink); border-color: var(--auto-line); background: #292b2e; box-shadow: inset 2px 0 0 var(--auto-accent); }
-.automation-subnav-item.active small { color: #c2c6cc; }
+#panel-automation .automation-sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-soft) 32%, transparent);
+}
+#panel-automation .automation-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 35px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+#panel-automation .automation-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
+#panel-automation .automation-search svg { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+#panel-automation .automation-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }
+#panel-automation .automation-search input::placeholder { color: var(--muted); }
+#panel-automation .automation-subnav { display: grid; gap: 3px; margin-top: 14px; }
+#panel-automation .automation-subnav-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 47px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+#panel-automation .automation-subnav-item span { font-size: 13px; }
+#panel-automation .automation-subnav-item small { color: var(--muted); font-size: 10px; white-space: nowrap; }
+#panel-automation .automation-subnav-item:hover { color: var(--ink); border-color: var(--line); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+#panel-automation .automation-subnav-item.active { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+#panel-automation .automation-subnav-item.active small { color: var(--accent-bright); }
 #panel-automation .automation-subnav-item:focus-visible,
-#panel-automation .automation-section-filter:focus-visible,
+#panel-automation #automation-section-filter:focus-visible,
 #panel-automation button:focus-visible,
-#panel-automation input:focus-visible {
-  outline: 2px solid var(--auto-accent);
-  outline-offset: 2px;
+#panel-automation input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#panel-automation .automation-sidebar-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 12px 8px 2px; color: var(--muted); font-size: 10px; }
+#panel-automation .automation-footer-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+#panel-automation .automation-mode-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 25px 32px;
+  scrollbar-color: var(--accent) transparent;
 }
-.automation-sidebar-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 12px 8px 2px; color: var(--auto-subtle); font-size: 10px; }
-.automation-sidebar-footer .automation-footer-dot { width: 6px; height: 6px; box-shadow: none; }
-.automation-mode-content { min-width: 0; min-height: 0; overflow: auto; padding: 20px 25px 28px; background: var(--auto-bg); scrollbar-color: #50545a transparent; }
-.automation-section { display: none; max-width: 820px; animation: automation-section-in .18s ease-out both; }
-.automation-section.active { display: block; }
-@keyframes automation-section-in { from { opacity: .45; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.automation-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-height: 49px; margin-bottom: 17px; padding-bottom: 12px; border-bottom: 1px solid var(--auto-line); }
-.automation-section-heading h2 { margin: 0; color: var(--auto-ink); font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
-.automation-section-heading p { max-width: 610px; margin: 6px 0 0; color: var(--auto-muted); font-size: 11px; line-height: 1.5; }
-#panel-automation .automation-permission-grid { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-#panel-automation .automation-permission-grid .automation-switch-card { min-height: 106px; }
-#panel-automation .automation-permission-grid .automation-startup-card { grid-column: 1 / -1; min-height: 82px; }
-#panel-automation .automation-switch-card { max-width: none; padding: 15px 16px; border: 1px solid var(--auto-line); border-radius: 4px; background: var(--auto-panel); }
-#panel-automation .automation-switch-card:hover { border-color: #5b6068; background: var(--auto-panel-raised); }
-#panel-automation .automation-switch-card h3 { margin: 0 0 6px; color: var(--auto-ink); font-size: 13px; font-weight: 600; }
-#panel-automation .automation-switch-card p { margin: 0; color: var(--auto-muted); font-size: 11px; line-height: 1.5; }
-#panel-automation .switch { flex-basis: 42px; height: 23px; }
-#panel-automation .switch span { background: #4b5056; }
-#panel-automation .switch span::after { width: 17px; height: 17px; top: 3px; left: 3px; }
-#panel-automation .switch input:checked + span { background: var(--auto-accent); }
-#panel-automation .switch input:checked + span::after { transform: translateX(19px); }
-#panel-automation .rest-mode-card { margin-top: 0; }
-#panel-automation .info-card { max-width: none; margin-top: 10px; padding: 15px 16px; border: 1px solid var(--auto-line); border-radius: 4px; color: var(--auto-muted); background: var(--auto-panel); box-shadow: none; }
-#panel-automation .info-card:hover { border-color: #5b6068; }
-#panel-automation .info-card strong { color: var(--auto-ink); font-size: 13px; }
-#panel-automation .info-card p { margin-top: 6px; color: var(--auto-muted); font-size: 11px; line-height: 1.55; }
-#panel-automation .movement-frequency-card, #panel-automation .wellbeing-card { display: grid; gap: 10px; }
-#panel-automation .wellbeing-heading strong { color: var(--auto-ink); }
-#panel-automation .wellbeing-heading p { color: var(--auto-muted); }
-#panel-automation .range-label { color: var(--auto-muted); }
-#panel-automation .range-label output, #panel-automation .dual-range-labels output { color: #7dc4ed; }
-#panel-automation .dual-range-track { background: #3b3f45; }
-#panel-automation .dual-range-fill { background: var(--auto-accent); }
-#panel-automation .dual-range-thumb { border-color: var(--auto-panel); background: var(--auto-accent); box-shadow: 0 0 0 1px #7dc4ed, 0 2px 6px rgba(0, 0, 0, .35); }
-#panel-automation .dual-range-ticks { color: var(--auto-subtle); }
-#panel-automation .dual-range-ticks::before { background: repeating-linear-gradient(90deg, rgba(164, 168, 174, .5) 0 1px, transparent 1px 25%); }
-#panel-automation .dual-range-labels { color: var(--auto-muted); }
-#panel-automation .movement-pause-status, #panel-automation .field-help { color: var(--auto-subtle); }
-#panel-automation .automation-grid { max-width: none; gap: 10px; }
-#panel-automation .automation-grid .info-card { min-height: 139px; margin-top: 0; }
-#panel-automation .perch-card, #panel-automation .wechat-monitor-card { margin-top: 10px; }
-#panel-automation .monitor-controls { color: var(--auto-muted); }
-#panel-automation .interval-row input { color: var(--auto-ink); border-color: var(--auto-line); background: #191b1e; }
-#panel-automation .monitor-buttons { gap: 7px; }
-#panel-automation .primary-button { color: #071a27; border: 1px solid #58b4e9; border-radius: 3px; background: var(--auto-accent); box-shadow: none; }
-#panel-automation .primary-button:hover:not(:disabled) { background: #57b5eb; transform: translateY(-1px); }
-#panel-automation .outline-button { color: #cfd3d8; border: 1px solid var(--auto-line); border-radius: 3px; background: #242629; }
-#panel-automation .outline-button:hover:not(:disabled) { color: var(--auto-ink); border-color: #7aaed0; background: var(--auto-accent-soft); }
-#panel-automation .status-text { color: #a9c2d2 !important; }
-#panel-automation .warning { max-width: none; margin: 10px 0 0; border: 1px solid #63514a; border-radius: 3px; color: #d0b8a9; background: #2b2422; }
-#panel-automation .automation-section::-webkit-scrollbar, #panel-automation .automation-mode-content::-webkit-scrollbar { width: 9px; height: 9px; }
-#panel-automation .automation-mode-content::-webkit-scrollbar-thumb { border: 2px solid var(--auto-bg); border-radius: 99px; background: #4c5158; }
+#panel-automation .automation-section { display: block; max-width: 820px; scroll-margin-top: 16px; }
+#panel-automation .automation-section + .automation-section { margin-top: 34px; padding-top: 30px; border-top: 1px solid var(--line); }
+#panel-automation .automation-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-height: 49px; margin-bottom: 17px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+#panel-automation .automation-section-heading h2 { margin: 0; color: var(--ink); font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+#panel-automation .automation-section-heading p { max-width: 610px; margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+#panel-automation .automation-permission-grid { max-width: none; }
+#panel-automation .automation-switch-card { max-width: none; }
+#panel-automation .automation-grid { max-width: none; }
+#panel-automation .automation-section .info-card,
+#panel-automation .automation-section .automation-switch-card { margin-top: 18px; }
+#panel-automation .automation-section .automation-permission-grid .automation-switch-card { margin-top: 0; }
+#panel-automation .automation-section .perch-card,
+#panel-automation .automation-section .wechat-monitor-card { margin-top: 18px; }
+#panel-automation .automation-mode-content::-webkit-scrollbar { width: 10px; height: 10px; }
+#panel-automation .automation-mode-content::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background: color-mix(in srgb, var(--accent) 60%, var(--line)); background-clip: padding-box; }
+
+/* 四套皮肤保留各自的表面语言，只给书签工作区增加轻微的边界差异。 */
+:root[data-skin="classic"] #panel-automation .automation-console { border-radius: 14px; }
+:root[data-skin="classic"] #panel-automation .automation-subnav-item { border-radius: 9px; }
+:root[data-skin="refined"] #panel-automation .automation-console { border-radius: 3px; background: rgba(25, 26, 25, .22); }
+:root[data-skin="refined"] #panel-automation .automation-sidebar { background: rgba(34, 36, 33, .2); }
+:root[data-skin="refined"] #panel-automation .automation-subnav-item { border-radius: 3px; }
+:root[data-skin="reference"] #panel-automation .automation-console { border: 2px solid rgba(240, 162, 46, .42); border-radius: 5px 17px 5px 17px; background: rgba(37, 20, 64, .18); }
+:root[data-skin="reference"] #panel-automation .automation-sidebar { background: rgba(24, 15, 48, .26); }
+:root[data-skin="reference"] #panel-automation .automation-subnav-item { border-radius: 3px 11px 3px 11px; }
+:root[data-skin="pepe"] #panel-automation .automation-console { border-color: #b98a68; border-radius: 4px 14px 4px 14px; background: rgba(255, 249, 239, .3); }
+:root[data-skin="pepe"] #panel-automation .automation-sidebar { background: rgba(255, 249, 239, .32); }
+:root[data-skin="pepe"] #panel-automation .automation-subnav-item { border-radius: 3px 10px 3px 10px; }
 
 /* Plan workspace: a compact, tabbed planner that keeps the three planning
    horizons visible without turning every action into another modal. */
@@ -844,13 +847,12 @@ button.plan-item-main { width: 100%; padding: 0; border: 0; outline: none; color
   .skin-options { grid-template-columns: 1fr; }
   .record-grid { grid-template-columns: 1fr; }
   #panel-automation { padding: 22px 16px 18px; }
-  #panel-automation .automation-header { align-items: flex-start; flex-direction: column; gap: 8px; }
-  #panel-automation .automation-console { grid-template-columns: 1fr; overflow: visible; }
-  #panel-automation .automation-sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid var(--auto-line); }
+  #panel-automation .automation-console { grid-template-columns: 1fr; max-height: none; overflow: visible; }
+  #panel-automation .automation-sidebar { min-height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   #panel-automation .automation-subnav { display: flex; overflow-x: auto; gap: 4px; margin-top: 10px; padding-bottom: 2px; }
   #panel-automation .automation-subnav-item { min-width: 116px; min-height: 44px; }
   #panel-automation .automation-sidebar-footer { display: none; }
-  #panel-automation .automation-mode-content { overflow: visible; padding: 18px 15px 22px; }
+  #panel-automation .automation-mode-content { max-height: calc(100vh - 260px); overflow: auto; padding: 18px 15px 22px; }
   #panel-automation .automation-section-heading { align-items: flex-start; }
 }
 

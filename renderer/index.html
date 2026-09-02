@@ -218,10 +218,7 @@
         </section>
 
         <section id="panel-automation" class="panel">
-          <header class="panel-header automation-header">
-            <div><h1>自动化</h1><p class="automation-subtitle">把桌宠的电脑操作集中在一个清晰的控制台里。</p></div>
-            <div class="automation-health"><span class="automation-health-dot"></span><span id="automation-state-text">操作中心</span></div>
-          </header>
+          <header class="panel-header"><div><p class="eyebrow">受控执行</p><h1>自动化</h1></div></header>
           <div class="automation-console">
             <aside class="automation-sidebar" aria-label="自动化设置分区">
               <label class="automation-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.7"></circle><path d="m16 16 5 5"></path></svg><input id="automation-section-filter" type="search" placeholder="筛选设置" aria-label="筛选自动化设置" /></label>
@@ -239,15 +236,15 @@
                 <div class="automation-section-heading"><div><h2>运行设置</h2><p>控制智能体能否操作电脑，以及 Windows 登录后是否自动启动。</p></div></div>
                 <div class="automation-permission-grid">
                   <article class="automation-switch-card">
-                    <div><h3>允许智能体执行电脑操作</h3><p>开启后，启动或恢复应用可直接执行；关闭时所有电脑操作都会被阻止。</p></div>
+                    <div><h2>允许智能体执行电脑操作</h2><p>开启后，启动或恢复应用可直接执行；关闭时所有电脑操作都会被阻止。</p></div>
                     <label class="switch"><input id="automation-enabled" type="checkbox" /><span></span></label>
                   </article>
                   <article class="automation-switch-card">
-                    <div><h3>自动执行已授权操作</h3><p>开启后，截图、微信输入和新建文件等操作会直接执行；覆盖、追加和编辑文件仍会弹窗确认。</p></div>
+                    <div><h2>自动执行已授权操作</h2><p>开启后，截图、微信输入和新建文件等操作会直接执行；覆盖、追加和编辑文件仍会弹窗确认。</p></div>
                     <label class="switch"><input id="automation-auto-execute" type="checkbox" /><span></span></label>
                   </article>
                   <article class="automation-switch-card automation-startup-card">
-                    <div><h3>开机自启动</h3><p>登录 Windows 后自动启动桌宠，控制面板保持隐藏；可随时关闭。</p></div>
+                    <div><h2>开机自启动</h2><p>登录 Windows 后自动启动桌宠，控制面板保持隐藏；可随时关闭。</p></div>
                     <label class="switch"><input id="automation-start-at-login" type="checkbox" /><span></span></label>
                   </article>
                 </div>
@@ -256,7 +253,7 @@
               <section class="automation-section" data-automation-section="motion">
                 <div class="automation-section-heading"><div><h2>定时执行</h2><p>安排桌宠的自然移动、休息状态和主动关怀提醒。</p></div></div>
                 <article class="automation-switch-card rest-mode-card">
-                  <div><h3>启用休息状态</h3><p>开启后桌宠会贴住屏幕底部并暂停自然移动；再次关闭即可恢复自然移动。</p></div>
+                  <div><h2>启用休息状态</h2><p>开启后桌宠会贴住屏幕底部并暂停自然移动；再次关闭即可恢复自然移动。</p></div>
                   <label class="switch"><input id="rest-mode" type="checkbox" /><span></span></label>
                 </article>
                 <article class="info-card movement-frequency-card">

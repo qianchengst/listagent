@@ -1427,26 +1427,43 @@
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
         document.querySelectorAll('.panel').forEach((panel) => panel.classList.toggle('active', panel.id === `panel-${tab.dataset.tab}`));
+        if (tab.dataset.tab === 'automation') {
+          const firstAutomationSection = automationSections.find((section) => !section.hidden);
+          if (firstAutomationSection) setAutomationBookmark(firstAutomationSection.dataset.automationSection);
+          setTimeout(updateAutomationBookmarkFromScroll, 0);
+        }
       });
     });
     const automationNavItems = [...document.querySelectorAll('.automation-subnav-item')];
     const automationSections = [...document.querySelectorAll('.automation-section')];
-    const activateAutomationSection = (target) => {
+    const automationModeContent = document.querySelector('.automation-mode-content');
+    const setAutomationBookmark = (target) => {
       const key = String(target || '').trim();
       automationNavItems.forEach((item) => {
         const active = item.dataset.automationTarget === key;
         item.classList.toggle('active', active);
         item.setAttribute('aria-current', active ? 'page' : 'false');
       });
-      automationSections.forEach((section) => {
-        const active = section.dataset.automationSection === key;
-        section.classList.toggle('active', active);
-        section.hidden = !active;
-      });
+    };
+    const scrollToAutomationSection = (target, behavior = 'smooth') => {
+      const section = automationSections.find((candidate) => candidate.dataset.automationSection === target && !candidate.hidden);
+      if (!section) return;
+      setAutomationBookmark(target);
+      section.scrollIntoView({ behavior, block: 'start' });
     };
     automationNavItems.forEach((item) => {
-      item.addEventListener('click', () => activateAutomationSection(item.dataset.automationTarget));
+      item.addEventListener('click', () => scrollToAutomationSection(item.dataset.automationTarget));
     });
+    const updateAutomationBookmarkFromScroll = () => {
+      if (!automationModeContent) return;
+      const marker = automationModeContent.getBoundingClientRect().top + 48;
+      let current = automationSections.find((section) => !section.hidden)?.dataset.automationSection;
+      automationSections.forEach((section) => {
+        if (!section.hidden && section.getBoundingClientRect().top <= marker) current = section.dataset.automationSection;
+      });
+      if (current) setAutomationBookmark(current);
+    };
+    automationModeContent?.addEventListener('scroll', updateAutomationBookmarkFromScroll, { passive: true });
     el('#automation-section-filter')?.addEventListener('input', (event) => {
       const query = String(event.target.value || '').trim().toLowerCase();
       automationNavItems.forEach((item) => {
@@ -1454,12 +1471,11 @@
         const section = automationSections.find((candidate) => candidate.dataset.automationSection === target);
         const haystack = `${item.textContent} ${section?.textContent || ''}`.toLowerCase();
         item.hidden = Boolean(query) && !haystack.includes(query);
+        if (section) section.hidden = Boolean(query) && !haystack.includes(query);
       });
-      const active = automationNavItems.find((item) => item.classList.contains('active') && !item.hidden);
-      if (!active) {
-        const firstVisible = automationNavItems.find((item) => !item.hidden);
-        if (firstVisible) activateAutomationSection(firstVisible.dataset.automationTarget);
-      }
+      const firstVisible = automationNavItems.find((item) => !item.hidden);
+      if (firstVisible) scrollToAutomationSection(firstVisible.dataset.automationTarget, 'auto');
+      else setAutomationBookmark('');
     });
     el('#chat-form').addEventListener('submit', (event) => { event.preventDefault(); submitChat(); });
     el('#chat-input').addEventListener('keydown', (event) => {
