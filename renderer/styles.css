@@ -383,9 +383,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 #panel-automation .automation-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-height: 49px; margin-bottom: 17px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 #panel-automation .automation-section-heading h2 { margin: 0; color: var(--ink); font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
 #panel-automation .automation-section-heading p { max-width: 610px; margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-#panel-automation .automation-permission-grid { max-width: none; }
+#panel-automation .automation-permission-grid { max-width: none; grid-template-columns: 1fr; }
 #panel-automation .automation-switch-card { max-width: none; }
-#panel-automation .automation-grid { max-width: none; }
+#panel-automation .automation-grid { max-width: none; grid-template-columns: 1fr; }
 #panel-automation .automation-section .info-card,
 #panel-automation .automation-section .automation-switch-card { margin-top: 18px; }
 #panel-automation .automation-section .automation-permission-grid .automation-switch-card { margin-top: 0; }
