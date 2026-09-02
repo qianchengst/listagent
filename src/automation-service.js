@@ -8,6 +8,7 @@ const { desktopCapturer, nativeImage, shell } = require('electron');
 
 const execFileAsync = promisify(execFile);
 const CAPTURE_DIR = path.join(__dirname, '..', '.runtime', 'wechat-captures');
+const DESKTOP_CAPTURE_DIR = path.join(__dirname, '..', '.runtime', 'desktop-captures');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DESKTOP_ROOT = path.resolve(os.homedir(), 'Desktop');
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
@@ -16,7 +17,7 @@ const TEXT_DOCUMENT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.log', '.
 let lastCreatedDocumentPath = '';
 const READ_ONLY_TOOLS = new Set([
   'get_current_time', 'get_system_location', 'get_weather', 'search_web', 'get_wechat_status',
-  'read_text_document', 'read_word_document'
+  'read_text_document', 'read_word_document', 'capture_desktop_screen'
 ]);
 const CONFIRMATION_REQUIRED_TOOLS = new Set([
   'edit_text_document', 'edit_word_document'
@@ -109,6 +110,18 @@ const TOOL_DEFINITIONS = [
       name: 'capture_wechat_window',
       description: '读取当前微信聊天窗口画面；随后由本地 YOLO 判断最新气泡归属，再由视觉模型读取对方气泡文字；不会发送消息。',
       parameters: { type: 'object', properties: {}, additionalProperties: false }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'capture_desktop_screen',
+      description: '截取当前 Windows 桌面的完整可见画面（包含正在显示的窗口），供视觉模型读取屏幕上的文字、界面和其他内容；只读，不修改电脑。用户询问“屏幕上/桌面上/电脑上显示什么”或要求看当前界面时必须调用。',
+      parameters: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false
+      }
     }
   },
   {
@@ -958,6 +971,113 @@ if (-not [IO.File]::Exists($target)) { throw '截图文件未生成。' }
   };
 }
 
+async function captureDesktopWithDesktopCapturer() {
+  try {
+    // The PowerShell implementation below captures the complete virtual
+    // desktop. Electron is kept as a compatibility fallback for environments
+    // where CopyFromScreen is unavailable (for example a restricted session).
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      // Request a large lossless thumbnail. Electron returns the best size it
+      // can provide for the display, so do not resize the resulting PNG.
+      thumbnailSize: { width: 7680, height: 4320 },
+      fetchWindowIcons: false
+    });
+    const source = sources.find((item) => item?.thumbnail && !item.thumbnail.isEmpty());
+    if (!source?.thumbnail) return null;
+    const data = source.thumbnail.toPNG();
+    if (!data.length) return null;
+    const size = source.thumbnail.getSize();
+    return {
+      data,
+      width: size.width,
+      height: size.height,
+      displayId: source.display_id || ''
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function captureDesktopWithPowerShell(capturePath) {
+  const pathBase64 = Buffer.from(capturePath, 'utf8').toString('base64');
+  const command = `Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class ListAgentDesktopCaptureApi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+}
+'@
+[ListAgentDesktopCaptureApi]::SetProcessDPIAware() | Out-Null
+$target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${pathBase64}'))
+# SM_X/Y/VIRTUALSCREEN and SM_CX/CY/VIRTUALSCREEN describe every monitor.
+$left = [ListAgentDesktopCaptureApi]::GetSystemMetrics(76)
+$top = [ListAgentDesktopCaptureApi]::GetSystemMetrics(77)
+$width = [Math]::Max(1, [ListAgentDesktopCaptureApi]::GetSystemMetrics(78))
+$height = [Math]::Max(1, [ListAgentDesktopCaptureApi]::GetSystemMetrics(79))
+$bitmap = New-Object System.Drawing.Bitmap($width, $height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+try {
+  $graphics.CopyFromScreen($left, $top, 0, 0, (New-Object System.Drawing.Size($width, $height)), [System.Drawing.CopyPixelOperation]::SourceCopy)
+  $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+} finally {
+  $graphics.Dispose()
+  $bitmap.Dispose()
+}
+@{ ok = $true; x = $left; y = $top; width = $width; height = $height } | ConvertTo-Json -Compress`;
+  const output = await runPowerShell(command, 30000);
+  return parsePowerShellJson(output.stdout, null);
+}
+
+async function captureDesktopScreen() {
+  fs.mkdirSync(DESKTOP_CAPTURE_DIR, { recursive: true });
+  const capturePath = path.join(DESKTOP_CAPTURE_DIR, `${Date.now()}-${crypto.randomUUID()}.png`);
+
+  // CopyFromScreen gives a pixel-for-pixel capture of the whole virtual
+  // desktop, including multiple monitors and windows that are not owned by
+  // Electron. Prefer it so the vision model receives the complete display.
+  try {
+    const result = await captureDesktopWithPowerShell(capturePath);
+    if (result?.ok && fs.existsSync(capturePath)) {
+      const data = fs.readFileSync(capturePath);
+      let actualSize = { width: 0, height: 0 };
+      try { actualSize = nativeImage.createFromBuffer(data).getSize(); } catch { /* use PowerShell dimensions */ }
+      return {
+        ok: true,
+        path: capturePath,
+        hash: crypto.createHash('sha256').update(data).digest('hex'),
+        base64: data.toString('base64'),
+        width: actualSize.width || Number(result.width) || 0,
+        height: actualSize.height || Number(result.height) || 0,
+        virtualX: Number(result.x) || 0,
+        virtualY: Number(result.y) || 0,
+        captureMethod: 'powershell-copy-from-screen'
+      };
+    }
+  } catch {
+    // Fall through to Electron's screen source below.
+  }
+
+  const desktopCapture = await captureDesktopWithDesktopCapturer();
+  if (!desktopCapture) {
+    throw new Error('无法截取当前桌面，请确认 Windows 桌面处于解锁状态后重试。');
+  }
+  fs.writeFileSync(capturePath, desktopCapture.data);
+  return {
+    ok: true,
+    path: capturePath,
+    hash: crypto.createHash('sha256').update(desktopCapture.data).digest('hex'),
+    base64: desktopCapture.data.toString('base64'),
+    width: desktopCapture.width,
+    height: desktopCapture.height,
+    displayId: desktopCapture.displayId,
+    captureMethod: 'electron-screen-capturer'
+  };
+}
+
 async function getWeChatStatus() {
   const command = "$items = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(WeChat|Weixin)$' } | ForEach-Object { $_.ProcessName }); @{ running = ($items.Count -gt 0); processes = $items } | ConvertTo-Json -Compress";
   const { stdout } = await runPowerShell(command);
@@ -1206,6 +1326,22 @@ async function executeTool(name, args, automationEnabled) {
           __wechatImageBase64: capture.base64
         };
       }
+    case 'capture_desktop_screen':
+      {
+        const capture = await captureDesktopScreen();
+        return {
+          ok: true,
+          path: capture.path,
+          hash: capture.hash,
+          width: capture.width,
+          height: capture.height,
+          virtualX: capture.virtualX,
+          virtualY: capture.virtualY,
+          displayId: capture.displayId,
+          captureMethod: capture.captureMethod,
+          __desktopImageBase64: capture.base64
+        };
+      }
     case 'get_wechat_status':
       return getWeChatStatus();
     case 'send_text_to_active_wechat':
@@ -1238,6 +1374,7 @@ function describeToolCall(name, args) {
   if (name === 'open_application') return `打开应用：${args.app || args.application || args.name || args.program || '（未知）'}`;
   if (name === 'focus_wechat') return '恢复并置前微信窗口';
   if (name === 'capture_wechat_window') return '截取当前微信窗口供模型识别';
+  if (name === 'capture_desktop_screen') return '截取整个桌面供视觉模型识别';
   if (name === 'get_wechat_status') return '检查微信是否正在运行（不读取消息）';
   if (name === 'send_text_to_active_wechat') return `${args.send === false ? '粘贴到' : '发送至'}当前微信窗口：${String(args.text || '').slice(0, 120)}`;
   if (name === 'read_text_document') return `读取文本文档：${args.file_path || args.path || '（缺少路径）'}`;
@@ -1258,6 +1395,7 @@ module.exports = {
   findWeChatWindows,
   focusFirstWeChatWindow,
   captureWeChatWindow,
+  captureDesktopScreen,
   sendTextToActiveWeChat,
   normalizeApplicationName,
   getCurrentTime,

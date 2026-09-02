@@ -80,7 +80,7 @@ function makeSystemMessage(settings) {
   const automationEnabled = settings.automation?.enabled === true;
   const autoExecute = automationEnabled && settings.automation?.autoExecute === true;
   const permissionSummary = !automationEnabled
-    ? '电脑操作未开启；时间、天气、联网搜索以及阅读项目内文档等只读工具仍可直接使用，启动应用、微信操作和文档修改需要先开启权限。'
+    ? '电脑操作未开启；时间、天气、联网搜索、读取项目内文档以及读取当前桌面截图等只读工具仍可直接使用，启动应用、微信操作和文档修改需要先开启权限。'
     : autoExecute
       ? '已开启：可直接打开网页、启动/恢复应用、截图以及向当前微信窗口粘贴发送文字；新建文件可直接执行，覆盖、追加和编辑文件仍需要确认。'
       : '已开启：启动或恢复应用可直接执行；发送文字、截图以及文档创建和编辑仍需单独确认。';
@@ -108,14 +108,15 @@ ${examples}
 4. 当前电脑操作权限：${permissionSummary}
 5. 涉及当前时间、日期、所在位置、天气、新闻、价格、法规或其他现实世界实时信息时，不要凭记忆猜测：先调用 get_current_time、get_system_location、get_weather 或 search_web，再根据工具结果回答，并注明位置是网络大致定位时要说明“约”。
 6. 当用户要求查看微信消息时，先调用“capture_wechat_window”；系统会先用本地 YOLOv8 判断纵坐标最低气泡属于对方还是自己，再由视觉模型读取对方气泡文字，最后把纯文本结果交给你。只有 sender=other 才能当作对方的新消息；sender=self 或 unknown 时不要代为回复，也不要猜测。
-7. 微信回复是“帮使用者回消息”：把自己视为使用者的代笔和助手，用使用者的第一人称、结合上下文直接拟写可发送的正文；不要自称桌宠、智能体或模型，不要说“我替你”“模型认为”，不要替使用者增加承诺、态度或敏感信息。除非使用者明确要求解释，否则只输出适合发送给对方的消息正文。
-8. 微信监听自动回复和用户在对话中要求“帮我回复微信”都遵守同一原则：保留使用者原意，同时用人格设定提供自然的语气和措辞；不确定收件人、意图或关键信息时先询问使用者，不要猜测。
-9. 微信工具只作用于当前可见微信窗口，不自行猜测收件人；微信监听必须由用户在自动化页面主动开启。
-10. 遇到敏感、不可逆或不明确的操作，应解释限制并暂停。
-11. 先直接回答能回答的问题，只有确有必要时才提出工具调用。
-12. 现实信息工具返回结果后，也必须保持人格化表达：不要原样复述 JSON、字段或“操作已执行”，要结合关系设定和语言示例自然转述，至少保留符合人格的称呼、语气或态度。
-13. 文档工具：read_text_document 和 read_word_document 用于阅读项目目录或桌面内的文档；编辑、覆盖或追加文件必须先提出待确认操作，不能在未确认时执行。若使用者已在“自动执行已授权操作”中明确开启，新建文本文件（write_text_document mode=create）和新建 Word 文件（create_word_document）可直接执行。用户未指定保存路径时默认使用 desktop/ 下的文件；只有工具返回成功后才能声称文档已创建或修改。
-14. 复合任务必须按顺序确认每个实际结果：先取得天气等信息，再执行打开应用，最后等待文件修改确认；不能因为模型生成了自然语言就声称后续步骤已经完成。`
+7. 当用户询问“屏幕上/桌面上/电脑上显示什么”、要求读取当前界面文字、判断页面状态或看一眼电脑画面时，必须调用 capture_desktop_screen。该工具会截取整个 Windows 虚拟桌面；随后先交给视觉模型做客观识别，再把识别结果交给纯文本模型。视觉模型只负责观察，最终回答必须由你依据完整人格设定生成；不能在没有截图时声称看到了屏幕内容，也不要把视觉模型的原始 JSON 直接展示给使用者。
+8. 微信回复是“帮使用者回消息”：把自己视为使用者的代笔和助手，用使用者的第一人称、结合上下文直接拟写可发送的正文；不要自称桌宠、智能体或模型，不要说“我替你”“模型认为”，不要替使用者增加承诺、态度或敏感信息。除非使用者明确要求解释，否则只输出适合发送给对方的消息正文。
+9. 微信监听自动回复和用户在对话中要求“帮我回复微信”都遵守同一原则：保留使用者原意，同时用人格设定提供自然的语气和措辞；不确定收件人、意图或关键信息时先询问使用者，不要猜测。
+10. 微信工具只作用于当前可见微信窗口，不自行猜测收件人；微信监听必须由用户在自动化页面主动开启。
+11. 遇到敏感、不可逆或不明确的操作，应解释限制并暂停。
+12. 先直接回答能回答的问题，只有确有必要时才提出工具调用。
+13. 现实信息工具返回结果后，也必须保持人格化表达：不要原样复述 JSON、字段或“操作已执行”，要结合关系设定和语言示例自然转述，至少保留符合人格的称呼、语气或态度。桌面截图识别结果也必须经过同样的个性化转述。
+14. 文档工具：read_text_document 和 read_word_document 用于阅读项目目录或桌面内的文档；编辑、覆盖或追加文件必须先提出待确认操作，不能在未确认时执行。若使用者已在“自动执行已授权操作”中明确开启，新建文本文件（write_text_document mode=create）和新建 Word 文件（create_word_document）可直接执行。用户未指定保存路径时默认使用 desktop/ 下的文件；只有工具返回成功后才能声称文档已创建或修改。
+15. 复合任务必须按顺序确认每个实际结果：先取得天气等信息，再执行打开应用，最后等待文件修改确认；不能因为模型生成了自然语言就声称后续步骤已经完成。`
   };
 }
 
@@ -554,6 +555,20 @@ function inferRealityToolCall(text) {
   return null;
 }
 
+function inferDesktopScreenIntent(text) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+  // Requests about a specific WeChat message should continue through the
+  // bubble/YOLO pipeline, which can distinguish the sender. A general screen
+  // question uses the complete desktop capture instead.
+  if (/(?:微信|wechat|weixin)/iu.test(value) && /(?:消息|聊天|对方|回复|气泡|联系人)/u.test(value)) return null;
+  const screenReference = /(?:屏幕|桌面|电脑(?:屏幕)?|显示器|当前界面|这个界面|画面|页面|窗口|屏上|显示的|截图|这个(?:报错|错误|提示)|这里显示|此处显示|\bscreen\b|\bdesktop\b|\bcurrent page\b)/iu.test(value);
+  const questionOrRead = /(?:什么|哪些|有没有|是否|能看到|看得到|帮我看|看看|看一下|看下|读一下|识别|内容|文字|发生了什么|什么情况|状态|报错|错误|怎么了|怎么回事|为何|显示)/u.test(value);
+  if (!screenReference || !questionOrRead) return null;
+  if (/(?:打开|启动|运行|关闭|最小化|最大化).{0,8}(?:窗口|页面|应用)/u.test(value) && !/(?:显示什么|看一下|读一下|识别)/u.test(value)) return null;
+  return localToolCall('capture_desktop_screen');
+}
+
 const PERMISSION_FREE_TOOLS = new Set(['open_application', 'open_text_document_in_notepad', ...READ_ONLY_TOOLS]);
 
 function requiresConfirmationToolCall(toolCall) {
@@ -724,12 +739,18 @@ function formatReadOnlyToolResult(name, result, userText = '', settings = {}) {
     const suffix = result.truncated ? '\n（内容较长，已截取前 160000 个字符。）' : '';
     return wrap(`已读取${label} ${result.filePath || ''}：\n${result.content || '（文档为空）'}${suffix}`);
   }
+  if (name === 'capture_desktop_screen') {
+    const size = Number(result.width) > 0 && Number(result.height) > 0
+      ? `（${Math.round(Number(result.width))}×${Math.round(Number(result.height))} 像素）`
+      : '';
+    return wrap(`已截取当前整个桌面${size}，视觉模型正在读取画面。`);
+  }
   return wrap(result.message || '');
 }
 
 function formatReadOnlyToolFailure(name, result, settings = {}) {
   if (!READ_ONLY_TOOLS.has(name) || !result?.error) return '';
-  const labels = { get_current_time: '时间', get_system_location: '位置', get_weather: '天气', search_web: '搜索' };
+  const labels = { get_current_time: '时间', get_system_location: '位置', get_weather: '天气', search_web: '搜索', capture_desktop_screen: '桌面画面' };
   const style = personaFallbackStyle(settings);
   return `${style.prefix}${labels[name] || '这项信息'}暂时没查到：${result.error}${style.suffix}`;
 }
@@ -997,6 +1018,49 @@ async function runWechatVisionPass(settings, imageBase64, instruction) {
   return parseWechatObservation(message.content);
 }
 
+async function runDesktopVisionPass(settings, imageBase64, userQuestion) {
+  const request = async (payload, mimeType = 'image/png') => {
+    const prompt = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `你是桌面画面识别器，不负责和使用者闲聊，也不要生成带人格的最终回复。请只依据这张当前 Windows 整个桌面的截图，回答下面的问题：
+${String(userQuestion || '').slice(0, 2000)}
+
+请读取与问题有关的可见窗口、文字、按钮、错误提示、网页或应用状态；看不清、被遮挡或截图中没有的信息必须明确说“无法从截图确认”，不要猜测。先用简洁的纯文本描述事实，不要输出 JSON、Markdown、分析过程或工具调用。若画面没有足够信息，只返回 NO_VISIBLE_ANSWER。`
+        },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${payload}`, detail: 'high' } }
+      ]
+    };
+    return requestCompletion(settings, [prompt], {
+      allowTools: false,
+      model: settings.api.visionModel,
+      requiresVision: true
+    });
+  };
+  if (typeof imageBase64 !== 'string' || !imageBase64.trim()) throw new Error('桌面截图为空。');
+  let message;
+  try {
+    message = await request(imageBase64);
+  } catch (error) {
+    const compact = compactVisionImage(imageBase64);
+    if (!compact || !/无法连接模型服务|fetch failed|请求体|413|超时/i.test(String(error.message || ''))) {
+      throw new Error(`视觉模型识别桌面截图失败：${error.message}`);
+    }
+    try {
+      message = await request(compact.base64, compact.mimeType);
+    } catch (retryError) {
+      throw new Error(`视觉模型识别桌面截图失败：${retryError.message}（已尝试压缩截图重试）`);
+    }
+  }
+  const text = messageText(message.content).trim();
+  return {
+    text: /^NO_VISIBLE_ANSWER$/i.test(text) ? '' : text.slice(0, 12000),
+    raw: text
+  };
+}
+
 async function analyzeWechatImage(settings, imageBase64, yoloDetection) {
   const image = typeof imageBase64 === 'string' ? imageBase64.trim() : '';
   if (!image) throw new Error('微信截图为空。');
@@ -1113,9 +1177,12 @@ async function chat(settings, userText, sessionId = 'default', options = {}) {
     return { content: summary, actions: [] };
   }
 
-  const realityCall = !documentCall ? inferRealityToolCall(text) : null;
+  const screenCall = !documentCall ? inferDesktopScreenIntent(text) : null;
+  const realityCall = !documentCall && !screenCall ? inferRealityToolCall(text) : null;
   let message = documentCall
     ? { role: 'assistant', content: '', tool_calls: [documentCall] }
+    : screenCall
+    ? { role: 'assistant', content: '', tool_calls: [screenCall] }
     : realityCall
     ? { role: 'assistant', content: '', tool_calls: [realityCall] }
     : await requestCompletion(settings, session);
@@ -1124,7 +1191,7 @@ async function chat(settings, userText, sessionId = 'default', options = {}) {
   // recover the tool call locally so the permission/confirmation flow still
   // works and the request is not silently treated as ordinary conversation.
   if ((!Array.isArray(message.tool_calls) || message.tool_calls.length === 0) && settings.automation?.enabled === true) {
-    const inferredCall = inferOpenApplicationIntent(text) || inferOpenDocumentIntent(text) || inferDocumentToolCall(text);
+    const inferredCall = inferOpenApplicationIntent(text) || inferOpenDocumentIntent(text) || inferDocumentToolCall(text) || inferDesktopScreenIntent(text);
     if (inferredCall) message = { ...message, tool_calls: [inferredCall] };
   }
   let autoRounds = 0;
@@ -1132,6 +1199,7 @@ async function chat(settings, userText, sessionId = 'default', options = {}) {
     autoRounds += 1;
     session.push(message);
     let wechatObservation;
+    let desktopObservation;
     let lastToolResult;
     let lastToolName = '';
     for (const toolCall of message.tool_calls) {
@@ -1162,11 +1230,32 @@ async function chat(settings, userText, sessionId = 'default', options = {}) {
         toolSummary.wechatSender = wechatObservation.sender;
         toolSummary.recognizedText = wechatObservation.text || 'NO_NEW_MESSAGE';
         session.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(toolSummary) });
+      } else if (result && result.__desktopImageBase64) {
+        try {
+          desktopObservation = await runDesktopVisionPass(settings, result.__desktopImageBase64, text);
+        } finally {
+          if (result.path) {
+            try { fs.unlinkSync(result.path); } catch { /* best-effort cleanup */ }
+          }
+        }
+        const toolSummary = { ...result };
+        delete toolSummary.__desktopImageBase64;
+        toolSummary.screenObservation = desktopObservation.text || 'NO_VISIBLE_ANSWER';
+        session.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(toolSummary) });
       } else {
         session.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
       }
     }
     if (wechatObservation !== undefined) addWechatObservationToSession(session, wechatObservation);
+    if (desktopObservation !== undefined) {
+      session.push({
+        role: 'user',
+        visible: false,
+        content: desktopObservation.text
+          ? `视觉模型刚刚读取了整个桌面截图。与用户原问题有关的客观观察如下：\n${desktopObservation.text}\n\n请只根据这些观察回答用户刚才的问题。必须结合完整人格设定、使用者关系和语言示例，用自然、有个性的中文解释；不要提到截图流水线、视觉模型、工具或原始 JSON，也不要补充观察中没有的事实。`
+          : '视觉模型无法从当前桌面截图确认与用户问题有关的信息。请诚实说明无法确认，不要猜测或声称看到了不存在的内容；同时保持完整人格设定的自然语气。'
+      });
+    }
     if (realityCall && autoRounds === 1) {
       session.push({
         role: 'user',
@@ -1176,13 +1265,21 @@ async function chat(settings, userText, sessionId = 'default', options = {}) {
     }
     trimSession(session);
     try {
-      message = await requestCompletion(settings, session);
+      // Once the desktop image has been interpreted, the next call is the
+      // final text-only answer. Disable tools for that turn so providers that
+      // over-eagerly follow the “must inspect the screen” rule do not capture
+      // the same desktop repeatedly.
+      message = await requestCompletion(settings, session, desktopObservation !== undefined ? { allowTools: false } : {});
     } catch (error) {
       // A provider may execute the tool but reject the follow-up request that
       // contains tool-role messages. Do not report the real operation as a
       // failure in that case; return the concrete execution result instead.
       const summary = lastToolResult?.ok === false
         ? (formatReadOnlyToolFailure(lastToolName, lastToolResult, settings) || `操作未完成：${lastToolResult.error || '系统拒绝执行。'}`)
+        : desktopObservation !== undefined
+          ? (desktopObservation.text
+            ? `${personaFallbackStyle(settings).prefix}从当前桌面画面看：${desktopObservation.text}${personaFallbackStyle(settings).suffix}`
+            : `${personaFallbackStyle(settings).prefix}我暂时没能从当前桌面画面确认这件事。${personaFallbackStyle(settings).suffix}`)
         : (formatReadOnlyToolResult(lastToolName, lastToolResult, text, settings) || lastToolResult?.message || '操作已执行。');
       session.push({ role: 'assistant', content: summary });
       trimSession(session);
@@ -1247,6 +1344,7 @@ async function decideAction(settings, actionId, approved) {
     result = { ok: false, error: error.message };
   }
   let wechatObservation;
+  let desktopObservation;
   if (result && result.__wechatImageBase64) {
     try {
       const yoloDetection = result.path ? await detectWeChatBubble(result.path) : { available: false, error: '截图路径为空。' };
@@ -1261,10 +1359,33 @@ async function decideAction(settings, actionId, approved) {
     toolSummary.wechatSender = wechatObservation.sender;
     toolSummary.recognizedText = wechatObservation.text || 'NO_NEW_MESSAGE';
     session.push({ role: 'tool', tool_call_id: action.toolCallId, content: JSON.stringify(toolSummary) });
+  } else if (result && result.__desktopImageBase64) {
+    const screenQuestion = [...session].reverse().find((item) => item?.role === 'user' && item?.visible !== false)?.content
+      || '请说明当前电脑屏幕上显示的内容。';
+    try {
+      desktopObservation = await runDesktopVisionPass(settings, result.__desktopImageBase64, screenQuestion);
+    } finally {
+      if (result.path) {
+        try { fs.unlinkSync(result.path); } catch { /* best-effort cleanup */ }
+      }
+    }
+    const toolSummary = { ...result };
+    delete toolSummary.__desktopImageBase64;
+    toolSummary.screenObservation = desktopObservation.text || 'NO_VISIBLE_ANSWER';
+    session.push({ role: 'tool', tool_call_id: action.toolCallId, content: JSON.stringify(toolSummary) });
   } else {
     session.push({ role: 'tool', tool_call_id: action.toolCallId, content: JSON.stringify(result) });
   }
   if (wechatObservation !== undefined) addWechatObservationToSession(session, wechatObservation);
+  if (desktopObservation !== undefined) {
+    session.push({
+      role: 'user',
+      visible: false,
+      content: desktopObservation.text
+        ? `视觉模型刚刚读取了整个桌面截图。客观观察如下：\n${desktopObservation.text}\n\n请结合完整人格设定回答用户原问题，不要提到截图流水线、视觉模型、工具或原始 JSON。`
+        : '视觉模型无法从当前桌面截图确认用户所问内容。请诚实说明无法确认，不要猜测，并保持自然的人格语气。'
+    });
+  }
   trimSession(session);
 
   // A provider may return multiple tool calls despite the instruction. Wait until
@@ -1275,7 +1396,7 @@ async function decideAction(settings, actionId, approved) {
   }
 
   try {
-    const message = await requestCompletion(settings, session);
+    const message = await requestCompletion(settings, session, desktopObservation !== undefined ? { allowTools: false } : {});
     session.push(message);
     trimSession(session);
     return { toolResult: action.name === 'open_application' ? formatApplicationResult(result, action.args?.app, settings) : (result.message || result.error || '操作完成。'), ...responsePayload(message) };
@@ -1291,4 +1412,4 @@ function clearSession(sessionId = 'default') {
   persistSessions();
 }
 
-module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getSessionHistory, removeConversationPair, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };
+module.exports = { analyzeWechatImage, chat, chatWithWechatImage, clearSession, decideAction, generateGreeting, generateWellbeingMessage, generatePlanReminder, getSessionHistory, removeConversationPair, recordGreeting, getModelUsageTotals, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, inferDesktopScreenIntent, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply };

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chatWithWechatImage, generateGreeting, generateWellbeingMessage, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
+const { chatWithWechatImage, generateGreeting, generateWellbeingMessage, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, inferDesktopScreenIntent, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
 const { TOOL_DEFINITIONS } = require('../src/automation-service');
 
 function settings() {
@@ -143,6 +143,16 @@ test('reality questions get local read-only tool fallbacks', () => {
   assert.equal(JSON.parse(inferRealityToolCall('查询一下上海后天的天气').function.arguments).location, '上海');
   assert.deepEqual(JSON.parse(inferRealityToolCall('今天的天气').function.arguments), {});
   assert.equal(inferRealityToolCall('帮我搜索 Open-Meteo').function.name, 'search_web');
+});
+
+test('questions about the visible computer screen get a desktop capture tool call', () => {
+  assert.equal(inferDesktopScreenIntent('帮我看看电脑屏幕上显示了什么')?.function.name, 'capture_desktop_screen');
+  assert.equal(inferDesktopScreenIntent('读一下当前页面的报错').function.name, 'capture_desktop_screen');
+  assert.equal(inferDesktopScreenIntent('微信最后一条消息是什么'), null);
+  assert.equal(inferDesktopScreenIntent('请打开计算器'), null);
+  const names = TOOL_DEFINITIONS.map((item) => item.function.name);
+  assert.ok(names.includes('capture_desktop_screen'));
+  assert.equal(canAutoExecuteToolCalls({ automation: { enabled: false } }, [{ function: { name: 'capture_desktop_screen' } }]), true);
 });
 
 test('read-only results remain useful when the text provider is unavailable', () => {
