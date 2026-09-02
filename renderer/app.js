@@ -1120,6 +1120,12 @@
       el('#automation-enabled').checked = config.automation.enabled;
       el('#automation-auto-execute').checked = config.automation.autoExecute === true;
       el('#automation-start-at-login').checked = config.automation.startAtLogin === true;
+      const automationStateText = el('#automation-state-text');
+      if (automationStateText) {
+        automationStateText.textContent = config.automation.enabled
+          ? (config.automation.autoExecute === true ? '自动执行已授权操作' : '已开启 · 操作需确认')
+          : '操作已暂停';
+      }
       el('#rest-mode').checked = config.automation.restMode === true;
       const restOffset = Math.round(Number(config.automation.restOffsetPx) || 0);
       el('#rest-offset').value = restOffset;
@@ -1422,6 +1428,38 @@
         document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item === tab));
         document.querySelectorAll('.panel').forEach((panel) => panel.classList.toggle('active', panel.id === `panel-${tab.dataset.tab}`));
       });
+    });
+    const automationNavItems = [...document.querySelectorAll('.automation-subnav-item')];
+    const automationSections = [...document.querySelectorAll('.automation-section')];
+    const activateAutomationSection = (target) => {
+      const key = String(target || '').trim();
+      automationNavItems.forEach((item) => {
+        const active = item.dataset.automationTarget === key;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-current', active ? 'page' : 'false');
+      });
+      automationSections.forEach((section) => {
+        const active = section.dataset.automationSection === key;
+        section.classList.toggle('active', active);
+        section.hidden = !active;
+      });
+    };
+    automationNavItems.forEach((item) => {
+      item.addEventListener('click', () => activateAutomationSection(item.dataset.automationTarget));
+    });
+    el('#automation-section-filter')?.addEventListener('input', (event) => {
+      const query = String(event.target.value || '').trim().toLowerCase();
+      automationNavItems.forEach((item) => {
+        const target = item.dataset.automationTarget;
+        const section = automationSections.find((candidate) => candidate.dataset.automationSection === target);
+        const haystack = `${item.textContent} ${section?.textContent || ''}`.toLowerCase();
+        item.hidden = Boolean(query) && !haystack.includes(query);
+      });
+      const active = automationNavItems.find((item) => item.classList.contains('active') && !item.hidden);
+      if (!active) {
+        const firstVisible = automationNavItems.find((item) => !item.hidden);
+        if (firstVisible) activateAutomationSection(firstVisible.dataset.automationTarget);
+      }
     });
     el('#chat-form').addEventListener('submit', (event) => { event.preventDefault(); submitChat(); });
     el('#chat-input').addEventListener('keydown', (event) => {
