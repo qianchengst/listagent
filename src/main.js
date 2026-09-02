@@ -107,6 +107,7 @@ let deleteRequestPath = '';
 let petWindowScale = 1;
 let restModeActive = false;
 let companionRecordTimer;
+const COMPANION_RECORD_REFRESH_MS = 1000;
 let companionUsageCheckpoint = { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedRequests: 0 };
 const AUTO_MOVE_WATCHDOG_MS = 5000;
 
@@ -460,7 +461,11 @@ function broadcastPlans() {
 
 function startCompanionRecordMonitor() {
   if (companionRecordTimer) return;
-  companionRecordTimer = setInterval(() => broadcastCompanionRecord(), 5000);
+  // Keep the companion panel responsive while the pet is resting as well as
+  // while it is moving. A five-second cadence made the live metrics feel stale
+  // after a rest-mode toggle; the record itself remains persisted only when a
+  // metric changes, so this faster broadcast is inexpensive.
+  companionRecordTimer = setInterval(() => broadcastCompanionRecord(), COMPANION_RECORD_REFRESH_MS);
 }
 
 function stopCompanionRecordMonitor() {
@@ -718,9 +723,14 @@ function syncRestMode(config, { forcePosition = false } = {}) {
     if (changed || forcePosition) {
       positionPetAtRestCorner();
       emitMovementState(false, { perched: false });
+      // Rest mode changes the pet state without opening a chat or moving via
+      // the animation loop. Push the record immediately instead of waiting for
+      // the periodic refresh tick.
+      broadcastCompanionRecord();
     }
   } else if (changed) {
     scheduleRandomMove();
+    broadcastCompanionRecord();
   }
 }
 
