@@ -130,10 +130,12 @@ test('wellbeing reminders expose conservative defaults and safe bounds', () => {
   assert.equal(bounded.wellbeingLongUseThresholdMs, 240 * 60 * 1000);
 });
 
-test('topmost window candidates require usable bounds', () => {
+test('topmost window candidates ignore shell and wallpaper surfaces', () => {
   const windows = normalizeWindows([
     { X: 100, Y: 200, Width: 500, Height: 320, ProcessId: 1, Title: '置顶窗口' },
     { X: 120, Y: 220, Width: 800, Height: 600, ProcessId: 3, Title: 'NVIDIA GeForce Overlay DT' },
+    { X: 0, Y: 0, Width: 1920, Height: 1080, ProcessId: 4, Title: 'Wallpaper Engine' },
+    { X: 0, Y: 0, Width: 1920, Height: 1080, ProcessId: 5, Title: 'Program Manager' },
     { X: 0, Y: 0, Width: 120, Height: 60, ProcessId: 2, Title: '忽略的小窗口' }
   ]);
   assert.deepEqual(windows, [{ x: 100, y: 200, width: 500, height: 320, processId: 1, title: '置顶窗口' }]);
