@@ -1,6 +1,6 @@
 {
   "name": "listagent",
-  "version": "0.2.13",
+  "version": "0.2.15",
   "description": "可配置人格与 GIF 形象的本地桌宠智能体",
   "repository": {
     "type": "git",
