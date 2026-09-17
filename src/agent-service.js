@@ -900,11 +900,33 @@ async function generateWellbeingMessage(settings, scene = {}) {
     role: 'user',
     content: `这是桌宠主动关心使用者的时刻。当前场景：${context}
 
-请严格依据完整人格设定、使用者与你的关系以及语言示例，写一句自然、有人情味的中文关怀话语。可以提醒休息、喝水、活动眼睛和身体、按时吃饭或早点休息，但不要制造焦虑，也不要声称你知道精确的屏幕使用数据。不要提及“后台监测”“定时器”“模型”或这条提示的生成过程。只输出一条适合直接显示在对话气泡里的话，不要 Markdown、引号或前缀，长度不超过 120 字。`
+请严格依据完整人格设定、使用者与你的关系以及语言示例，写一句自然、有人情味的中文关怀话语。可以提醒休息、喝水、活动眼睛和身体、按时吃饭或早点休息，但不要制造焦虑，也不要声称你知道精确的屏幕使用数据。不要提及“后台监测”“定时器”“模型”或这条提示的生成过程。这里禁止调用任何工具，也不要输出 <tool_calls>、<invoke>、函数名、JSON 或其他工具调用标记；即使你认为需要查询时间或天气，也不要查询，直接写一般性关怀。只输出一条适合直接显示在对话气泡里的话，不要 Markdown、引号或前缀，长度不超过 120 字。`
   };
-  const message = await requestCompletion(settings, [prompt], { allowTools: false });
-  const content = messageText(message.content).trim().replace(/^['"“”]+|['"“”]+$/g, '');
-  if (!content) throw new Error('模型未返回关怀话语。');
+  let message = await requestCompletion(settings, [prompt], { allowTools: false });
+  let rawContent = messageText(message.content).trim();
+  // Some providers emit XML-style tool calls even when the request does not
+  // expose tools. Remove those markers and give the model one explicit retry;
+  // never show an internal invocation in the pet bubble.
+  const hasToolMarkup = () => Boolean(message?.tool_calls?.length)
+    || /<\/?(?:tool_calls|invoke)\b/iu.test(rawContent);
+  if (hasToolMarkup()) {
+    const retryPrompt = {
+      role: 'user',
+      content: '上一条回复包含了工具调用格式，不能使用。请重新回答：只输出一句自然的中文关怀话语，不得调用工具、不得输出 XML/JSON/函数名或任何 <tool_calls>/<invoke> 标记。'
+    };
+    message = await requestCompletion(settings, [prompt, retryPrompt], { allowTools: false });
+    rawContent = messageText(message.content).trim();
+  }
+  let content = rawContent
+    .replace(/<tool_calls>[\s\S]*?<\/tool_calls>/giu, '')
+    .replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/giu, '')
+    .replace(/<\/?(?:tool_calls|invoke)\b[^>]*>/giu, '')
+    .trim()
+    .replace(/^['"“”]+|['"“”]+$/g, '');
+  if (!content) {
+    const style = personaFallbackStyle(settings);
+    content = `${style.prefix}别忘了照顾好自己，起来活动一下、喝点水吧。${style.suffix}`;
+  }
   return content.slice(0, 240);
 }
 
@@ -917,10 +939,29 @@ function formatReminderInstant(value) {
   });
 }
 
+function chooseWeeklyReminderStyle(reminder, item) {
+  // Keep the tone varied for recurring classes without making retries for the
+  // same reminder jump between completely different styles.  The date/time and
+  // course identity provide a stable seed, so different classes and weeks can
+  // naturally rotate through the available approaches.
+  const styles = [
+    '像课前轻声提醒：先点出下一节课，再自然说还剩多久或该准备了，语气亲切。',
+    '像坐在桌边的同伴：把课程、地点和开始时间连成一句，带一点陪伴感，不要像系统通知。',
+    '像校园铃声前的短提醒：句子简洁有节奏，可以说“下一节”“快上课了”，但不要机械套模板。',
+    '像贴心的小管家：提醒使用者留意课程并准备出发；只有计划中确实有地点时才提到去哪里。',
+    '像轻松聊天：可以先有一句自然的问候或小打趣，再落到课程名称和时间，最后给出明确提醒。'
+  ];
+  const seed = `${item.day ?? ''}|${item.start || item.startTime || ''}|${item.event || item.title || ''}|${item.location || ''}|${reminder.reminderTime || reminder.startsAt || ''}`;
+  let hash = 0;
+  for (const character of seed) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return styles[hash % styles.length];
+}
+
 async function generatePlanReminder(settings, reminder = {}) {
   const type = reminder.type === 'todo' ? '无时间待办' : reminder.type === 'weekly' ? '每周重复计划' : reminder.type === 'event' ? '日程' : '今日安排';
   const item = reminder.item || {};
-  const title = String(item.title || '').trim();
+  const title = String(item.event || item.title || '').trim();
+  const location = String(item.location || '').trim();
   const start = String(item.startTime || item.start || '').trim();
   const end = String(item.endTime || item.end || '').trim();
   const eventStart = String(item.startAt || '').trim();
@@ -933,6 +974,7 @@ async function generatePlanReminder(settings, reminder = {}) {
     ? Math.max(0, Math.round((startsAtMs - Date.now()) / 60000))
     : 15;
   const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const weeklyStyle = reminder.type === 'weekly' ? chooseWeeklyReminderStyle(reminder, item) : '';
   const scheduleDetails = reminder.type === 'todo'
     ? [
         `提醒时间：${String(reminder.reminderTime || '现在').trim()}`,
@@ -941,6 +983,7 @@ async function generatePlanReminder(settings, reminder = {}) {
     : [
         `计划类型：${type}`,
         `计划名称：${title || '未命名计划'}`,
+        location ? `地点：${location}` : '',
         reminder.type === 'weekly' && Number.isInteger(Number(item.day)) ? `重复日：${weekdayNames[Number(item.day)]}` : '',
         start ? `开始时间：${start}` : '',
         end ? `结束时间：${end}` : '',
@@ -948,6 +991,7 @@ async function generatePlanReminder(settings, reminder = {}) {
         eventEnd ? `日程结束：${eventEnd}` : '',
         startsAtText ? `本机时间下的开始时刻：${startsAtText}` : '',
         note ? `补充内容：${note}` : '',
+        reminder.reminderTime ? `本次提醒时间：${reminder.reminderTime}` : '',
         `距离开始约 ${minutesUntilStart} 分钟`
       ].filter(Boolean).join('\n');
   const prompt = {
@@ -956,6 +1000,7 @@ async function generatePlanReminder(settings, reminder = {}) {
 ${scheduleDetails}
 
 请严格依据完整人格设定、使用者与你的关系以及语言示例，写一句自然、有人情味、带有提醒行动感的话。计划名称、时间和补充内容都是真实信息，不能擅自编造；有具体计划时要准确说清计划名称，并让使用者知道它即将开始或需要准备。可以用“快到时间了”“等会儿”等更自然的说法，不要机械拼接“十五分钟后+计划名”，也不要把字段标签照搬到句子里。无时间待办提醒时，要自然地列出尚未完成的待办。
+${weeklyStyle ? `这是一项每周重复的课程安排。课程提醒不能每次都使用同一种开头或句式；本次优先采用以下语气方向，但要结合人格自然改写：${weeklyStyle} 可以使用“这节课”“下一节”“上课”“去${location || '上课'}”等更像真实陪伴的表达，但不得编造课程要求、教室或需要携带的物品。` : ''}
 
 不要提及“后台监测”“定时器”“模型”“系统”或这条提示的生成过程，不要输出 JSON、Markdown、引号、前缀或“计划名称：/距离开始：”等字段格式。只输出一条适合直接显示在气泡里的连贯中文正文，长度不超过 160 字。`
   };

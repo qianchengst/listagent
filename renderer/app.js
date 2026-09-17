@@ -798,6 +798,11 @@
     let plans = null;
     const selectedWeeklyCells = new Set();
     let weeklyDragging = false;
+    let weeklyDragMode = 'select';
+    let weeklySelectionAnchorKey = '';
+    let weeklyMoveAnchorKey = '';
+    let weeklyMoveOriginKeys = [];
+    let weeklyMovePreview = null;
     const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const planClock = el('#plan-clock');
     const todayPlanDate = el('#today-plan-date');
@@ -806,6 +811,9 @@
     const eventPlanList = el('#event-plan-list');
     const weeklyGrid = el('#weekly-grid');
     const weeklySelectionCount = el('#weekly-selection-count');
+    const weeklyPlanEvent = el('#weekly-plan-event');
+    const weeklyPlanLocation = el('#weekly-plan-location');
+    const weeklyReminderInputs = [el('#weekly-reminder-1'), el('#weekly-reminder-2'), el('#weekly-reminder-3')];
     const weeklyStatus = el('#weekly-status');
     const planDataStatus = el('#plan-data-status');
     const planArchiveCount = el('#plan-archive-count');
@@ -929,15 +937,95 @@
       const [hour, minute] = time.split(':').map(Number); const total = hour * 60 + minute + minutes;
       return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
     }
+    function weeklyRowTimes() {
+      const inputs = weeklyGrid?.querySelectorAll('.weekly-row-time');
+      if (inputs?.length) return Array.from(inputs).map((input, index) => input.value || plans?.weekly?.rowTimes?.[index] || defaultWeeklyTime(index, plans?.weekly?.durationMinutes || 45));
+      return Array.isArray(plans?.weekly?.rowTimes) ? plans.weekly.rowTimes : [];
+    }
+    function weeklyCoordinate(key) {
+      const [dayText, start] = String(key || '').split('|');
+      const day = Number(dayText);
+      const row = weeklyRowTimes().indexOf(start);
+      return Number.isInteger(day) && day >= 0 && day < 7 && row >= 0 ? { day, row, start } : null;
+    }
+    function weeklyKeyAt(day, row) {
+      const times = weeklyRowTimes();
+      return day >= 0 && day < 7 && row >= 0 && row < times.length ? weeklyCellKey(day, times[row]) : '';
+    }
+    function weeklyRectKeys(anchorKey, currentKey) {
+      const anchor = weeklyCoordinate(anchorKey); const current = weeklyCoordinate(currentKey);
+      if (!anchor || !current) return new Set(currentKey ? [currentKey] : []);
+      const keys = new Set();
+      for (let day = Math.min(anchor.day, current.day); day <= Math.max(anchor.day, current.day); day += 1) {
+        for (let row = Math.min(anchor.row, current.row); row <= Math.max(anchor.row, current.row); row += 1) {
+          const key = weeklyKeyAt(day, row); if (key) keys.add(key);
+        }
+      }
+      return keys;
+    }
+    function weeklySlotMap() { return new Map((plans?.weekly?.slots || []).map((slot) => [weeklyCellKey(slot.day, slot.start), slot])); }
+    function syncWeeklyEditor() {
+      if (!weeklyPlanEvent || !weeklyPlanLocation) return;
+      const slot = selectedWeeklyCells.size === 1 ? weeklySlotMap().get([...selectedWeeklyCells][0]) : null;
+      weeklyPlanEvent.value = slot?.event || slot?.title || '';
+      weeklyPlanLocation.value = slot?.location || '';
+      const times = Array.isArray(slot?.reminderTimes) ? slot.reminderTimes : [];
+      weeklyReminderInputs.forEach((input, index) => { if (input) input.value = times[index] || ''; });
+    }
+    function clearWeeklyEditor() {
+      if (weeklyPlanEvent) weeklyPlanEvent.value = '';
+      if (weeklyPlanLocation) weeklyPlanLocation.value = '';
+      weeklyReminderInputs.forEach((input) => { if (input) input.value = ''; });
+    }
     function updateWeeklySelectionUi() {
-      if (weeklySelectionCount) weeklySelectionCount.textContent = selectedWeeklyCells.size ? `已选择 ${selectedWeeklyCells.size} 个时间格` : '尚未选择时间格';
-      weeklyGrid?.querySelectorAll('.week-cell').forEach((cell) => cell.classList.toggle('selected', selectedWeeklyCells.has(cell.dataset.key)));
+      if (weeklySelectionCount) {
+        if (weeklyDragMode === 'move' && weeklyMovePreview) weeklySelectionCount.textContent = weeklyMovePreview.valid ? `移动预览：${weeklyMovePreview.keys.length} 个时间格` : '移动目标超出表格范围';
+        else weeklySelectionCount.textContent = selectedWeeklyCells.size ? `已选择 ${selectedWeeklyCells.size} 个时间格` : '尚未选择时间格';
+      }
+      const previewKeys = new Set(weeklyMovePreview?.keys || []);
+      weeklyGrid?.querySelectorAll('.week-cell').forEach((cell) => {
+        cell.classList.toggle('selected', selectedWeeklyCells.has(cell.dataset.key));
+        cell.classList.toggle('move-preview', previewKeys.has(cell.dataset.key));
+      });
     }
     function normalizeWeeklyDuration(value) { return Math.min(240, Math.max(5, Math.round(Number(value) || 45))); }
     function normalizeWeeklyRows(value) { return Math.min(40, Math.max(1, Math.round(Number(value) || 13))); }
     function defaultWeeklyTime(index, duration) {
       const total = 8 * 60 + index * duration;
       return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    }
+    function buildWeeklyMovePreview(pointerKey) {
+      const anchor = weeklyCoordinate(weeklyMoveAnchorKey); const pointer = weeklyCoordinate(pointerKey);
+      if (!anchor || !pointer) return { valid: false, keys: [], moves: [] };
+      const deltaDay = pointer.day - anchor.day; const deltaRow = pointer.row - anchor.row;
+      const moves = []; const keys = []; const seen = new Set();
+      for (const fromKey of weeklyMoveOriginKeys) {
+        const origin = weeklyCoordinate(fromKey); if (!origin) return { valid: false, keys: [], moves: [] };
+        const toKey = weeklyKeyAt(origin.day + deltaDay, origin.row + deltaRow);
+        if (!toKey || seen.has(toKey)) return { valid: false, keys: [], moves: [] };
+        seen.add(toKey); keys.push(toKey); moves.push({ fromKey, toKey });
+      }
+      return { valid: true, keys, moves };
+    }
+    async function moveWeeklySelection(preview) {
+      if (!preview?.valid || !preview.moves?.length) return;
+      const sourceMap = weeklySlotMap(); const duration = normalizeWeeklyDuration(el('#weekly-duration')?.value || plans?.weekly?.durationMinutes || 45);
+      const moves = preview.moves.filter((move) => sourceMap.has(move.fromKey));
+      if (!moves.length) { if (weeklyStatus) weeklyStatus.textContent = '选中的格子没有可移动的计划。'; return; }
+      const sourceKeys = new Set(moves.map((move) => move.fromKey));
+      const clear = [...sourceKeys].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title: '', event: '', location: '', reminderTimes: [] }; });
+      const updates = moves.map(({ fromKey, toKey }) => {
+        const slot = sourceMap.get(fromKey); const [day, start] = toKey.split('|');
+        return { ...slot, day: Number(day), start, end: addMinutesToTime(start, duration) };
+      });
+      try {
+        plans = await api.upsertWeeklySlots([...clear, ...updates], duration);
+        selectedWeeklyCells.clear(); preview.keys.forEach((key) => selectedWeeklyCells.add(key));
+        weeklyMovePreview = null; weeklyDragMode = 'select'; renderPlans(plans);
+        if (weeklyStatus) weeklyStatus.textContent = `已移动 ${updates.length} 个计划格。`;
+      } catch (error) {
+        if (weeklyStatus) weeklyStatus.textContent = `移动失败：${error.message}`;
+      }
     }
     function weeklySettingsSnapshot() {
       const rowCount = normalizeWeeklyRows(el('#weekly-row-count')?.value || plans?.weekly?.rowCount || 13);
@@ -971,14 +1059,48 @@
         timeInput.addEventListener('change', async () => {
           const settings = weeklySettingsSnapshot();
           settings.rowTimes[rowIndex] = timeInput.value || defaultWeeklyTime(rowIndex, settings.durationMinutes);
-          try { plans = await api.saveWeeklySettings(settings); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存行表头时间。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存行表头失败：${error.message}`; }
+          try { plans = await api.saveWeeklySettings(settings); selectedWeeklyCells.clear(); weeklyMovePreview = null; clearWeeklyEditor(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存行表头时间。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存行表头失败：${error.message}`; }
         });
         time.append(timeInput); row.append(time);
         for (let day = 0; day < 7; day += 1) {
           const key = weeklyCellKey(day, start); const cell = document.createElement('td'); cell.className = 'week-cell'; cell.dataset.key = key; cell.dataset.day = String(day); cell.dataset.start = start;
-          const slot = existing.get(key); if (slot) { cell.classList.add('has-plan'); const text = document.createElement('span'); text.className = 'week-cell-title'; text.textContent = slot.title; cell.append(text); }
-          cell.addEventListener('pointerdown', (event) => { if (event.button !== 0) return; event.preventDefault(); weeklyDragging = true; selectedWeeklyCells.clear(); selectedWeeklyCells.add(key); updateWeeklySelectionUi(); });
-          cell.addEventListener('pointerenter', () => { if (!weeklyDragging) return; selectedWeeklyCells.add(key); updateWeeklySelectionUi(); });
+          const slot = existing.get(key);
+          if (slot) {
+            cell.classList.add('has-plan');
+            const eventText = document.createElement('span'); eventText.className = 'week-cell-event'; eventText.textContent = slot.event || slot.title || '';
+            if (eventText.textContent) cell.append(eventText);
+            if (slot.location) { const locationText = document.createElement('span'); locationText.className = 'week-cell-location'; locationText.textContent = `地点：${slot.location}`; cell.append(locationText); }
+            if (slot.reminderTimes?.length) { const reminderText = document.createElement('span'); reminderText.className = 'week-cell-reminders'; reminderText.textContent = `提醒 ${slot.reminderTimes.join(' · ')}`; cell.append(reminderText); }
+          }
+          cell.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            weeklyDragging = true;
+            if (selectedWeeklyCells.has(key) && existing.has(key)) {
+              // A normal click on an already-selected plan is an edit action.  Do
+              // not enter move mode until the pointer actually enters another
+              // cell; this keeps existing event cells selectable so their
+              // location can be filled in without accidentally starting a move.
+              weeklyDragMode = 'pending-move'; weeklyMoveAnchorKey = key; weeklyMoveOriginKeys = [...selectedWeeklyCells]; weeklyMovePreview = null;
+              syncWeeklyEditor();
+              if (weeklyStatus) weeklyStatus.textContent = '已选中计划，可编辑事件或地点；拖到另一格可移动整组计划。';
+            } else {
+              weeklyDragMode = 'select'; weeklySelectionAnchorKey = key; weeklyMovePreview = null; weeklyMoveOriginKeys = [];
+              selectedWeeklyCells.clear(); selectedWeeklyCells.add(key); syncWeeklyEditor();
+            }
+            updateWeeklySelectionUi();
+          });
+          cell.addEventListener('pointerenter', () => {
+            if (!weeklyDragging) return;
+            if (weeklyDragMode === 'pending-move') {
+              if (key === weeklyMoveAnchorKey) return;
+              weeklyDragMode = 'move';
+              if (weeklyStatus) weeklyStatus.textContent = '拖动到目标位置，松开鼠标移动整组计划。';
+              weeklyMovePreview = buildWeeklyMovePreview(key);
+            } else if (weeklyDragMode === 'move') weeklyMovePreview = buildWeeklyMovePreview(key);
+            else { const next = weeklyRectKeys(weeklySelectionAnchorKey, key); selectedWeeklyCells.clear(); next.forEach((item) => selectedWeeklyCells.add(item)); if (selectedWeeklyCells.size !== 1) syncWeeklyEditor(); }
+            updateWeeklySelectionUi();
+          });
           row.append(cell);
         }
         body.append(row);
@@ -989,7 +1111,15 @@
       plans = snapshot || plans; if (!plans) return;
       renderTodayPlans(); renderTodoReminderTimes(); renderEvents(); renderWeeklyGrid(); renderPlanArchives(); updatePlanClock();
     }
-    window.addEventListener('pointerup', () => { weeklyDragging = false; });
+    async function finishWeeklyPointerInteraction() {
+      if (!weeklyDragging) return;
+      const mode = weeklyDragMode; const preview = weeklyMovePreview;
+      weeklyDragging = false;
+      if (mode === 'move' && preview?.valid) await moveWeeklySelection(preview);
+      weeklyDragMode = 'select'; weeklyMoveAnchorKey = ''; weeklyMovePreview = null; weeklyMoveOriginKeys = []; updateWeeklySelectionUi();
+    }
+    window.addEventListener('pointerup', () => { void finishWeeklyPointerInteraction(); });
+    window.addEventListener('pointercancel', () => { weeklyDragging = false; weeklyDragMode = 'select'; weeklyMoveAnchorKey = ''; weeklyMovePreview = null; weeklyMoveOriginKeys = []; updateWeeklySelectionUi(); });
     api.onPlansChanged((snapshot) => renderPlans(snapshot));
     el('#plan-clock')?.addEventListener('click', updatePlanClock);
     document.querySelectorAll('.plan-tab').forEach((tab) => {
@@ -1020,14 +1150,29 @@
     el('#weekly-row-count')?.addEventListener('change', saveWeeklyTableSettings);
     el('#weekly-duration')?.addEventListener('change', saveWeeklyTableSettings);
     el('#weekly-save')?.addEventListener('click', async () => {
-      const title = el('#weekly-plan-title').value.trim(); if (!selectedWeeklyCells.size || !title) { if (weeklyStatus) weeklyStatus.textContent = '请先选择时间格并填写计划名称。'; return; }
+      const event = weeklyPlanEvent?.value.trim() || ''; const location = weeklyPlanLocation?.value.trim() || '';
+      if (!selectedWeeklyCells.size || (!event && !location)) { if (weeklyStatus) weeklyStatus.textContent = '请先选择时间格，并填写事件或地点。'; return; }
       const duration = normalizeWeeklyDuration(el('#weekly-duration').value);
-      const slots = [...selectedWeeklyCells].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title }; });
-      try { plans = await api.upsertWeeklySlots(slots, duration); el('#weekly-plan-title').value = ''; selectedWeeklyCells.clear(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存每周重复计划。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存失败：${error.message}`; }
+      const reminderTimes = [...new Set(weeklyReminderInputs.map((input) => input?.value || '').filter(Boolean))].slice(0, 3);
+      const existing = weeklySlotMap();
+      const slots = [...selectedWeeklyCells].map((key) => {
+        const [day, start] = key.split('|');
+        const prior = existing.get(key);
+        // Empty editor fields mean “leave this part unchanged” when editing an
+        // existing slot.  This lets users add a location to an event (or edit
+        // the event while retaining its location) without losing the other
+        // value.  The Clear button remains the explicit way to remove a slot.
+        const nextEvent = event || prior?.event || (prior?.title || '');
+        const nextLocation = location || prior?.location || '';
+        const nextReminders = reminderTimes.length ? reminderTimes : (Array.isArray(prior?.reminderTimes) ? prior.reminderTimes : []);
+        return { day: Number(day), start, end: addMinutesToTime(start, duration), title: nextEvent || nextLocation, event: nextEvent, location: nextLocation, reminderTimes: nextReminders };
+      }).filter((slot) => slot.event || slot.location);
+      if (!slots.length) { if (weeklyStatus) weeklyStatus.textContent = '请填写事件或地点。'; return; }
+      try { plans = await api.upsertWeeklySlots(slots, duration); selectedWeeklyCells.clear(); clearWeeklyEditor(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已保存每周重复计划。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `保存失败：${error.message}`; }
     });
     el('#weekly-clear')?.addEventListener('click', async () => {
-      if (!selectedWeeklyCells.size) return; const duration = normalizeWeeklyDuration(el('#weekly-duration').value); const slots = [...selectedWeeklyCells].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title: '' }; });
-      try { plans = await api.upsertWeeklySlots(slots, duration); selectedWeeklyCells.clear(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已清除选中时间格。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `清除失败：${error.message}`; }
+      if (!selectedWeeklyCells.size) return; const duration = normalizeWeeklyDuration(el('#weekly-duration').value); const slots = [...selectedWeeklyCells].map((key) => { const [day, start] = key.split('|'); return { day: Number(day), start, end: addMinutesToTime(start, duration), title: '', event: '', location: '', reminderTimes: [] }; });
+      try { plans = await api.upsertWeeklySlots(slots, duration); selectedWeeklyCells.clear(); clearWeeklyEditor(); renderPlans(plans); if (weeklyStatus) weeklyStatus.textContent = '已清除选中时间格。'; } catch (error) { if (weeklyStatus) weeklyStatus.textContent = `清除失败：${error.message}`; }
     });
     el('#event-plan-form')?.addEventListener('submit', async (event) => {
       event.preventDefault(); const title = el('#event-plan-title').value.trim(); const startAt = el('#event-plan-start').value; if (!title || !startAt) return;
@@ -1714,6 +1859,21 @@
     el('#wellbeing-enabled').addEventListener('change', async (event) => {
       applyConfig(await api.saveConfig({ automation: { wellbeingEnabled: event.target.checked } }));
     });
+    el('#trigger-wellbeing')?.addEventListener('click', async () => {
+      const button = el('#trigger-wellbeing');
+      const status = el('#wellbeing-status');
+      if (!button || !status) return;
+      button.disabled = true;
+      status.textContent = '正在生成关怀话语…';
+      try {
+        const result = await api.triggerWellbeing();
+        status.textContent = result?.text ? '提醒已弹出。' : '提醒已发送。';
+      } catch (error) {
+        status.textContent = `提醒生成失败：${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
     el('#wellbeing-interval').addEventListener('input', (event) => {
       el('#wellbeing-interval-output').value = `${event.target.value} 分钟`;
       el('#wellbeing-interval-output').textContent = el('#wellbeing-interval-output').value;
@@ -1801,6 +1961,18 @@
     el('#open-wechat-debug').addEventListener('click', () => api.openWechatDebug());
     api.onWechatMonitorEvent((event) => {
       el('#wechat-monitor-status').textContent = event?.message || '';
+    });
+    el('#restart').addEventListener('click', async () => {
+      const button = el('#restart');
+      button.disabled = true;
+      button.textContent = '正在重启…';
+      try {
+        await api.restart();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = '重启程序';
+        window.alert(`重启失败：${error.message}`);
+      }
     });
     el('#quit').addEventListener('click', () => api.quit());
 

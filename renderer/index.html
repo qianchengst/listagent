@@ -55,6 +55,7 @@
         </nav>
         <div class="sidebar-bottom">
           <span class="status-dot"></span><span>本地优先 · 操作需确认</span>
+          <button id="restart" class="quiet-button">重启程序</button>
           <button id="quit" class="quiet-button">退出应用</button>
         </div>
       </aside>
@@ -271,6 +272,7 @@
                 <article class="info-card wellbeing-card">
                   <div class="wellbeing-heading"><div><strong>人文关怀提醒</strong><p>桌宠会根据连续使用时长、系统空闲状态和时间段，偶尔用你的人格设定生成一句关心的话，并在气泡中显示。不会读取具体屏幕内容。</p></div><label class="switch"><input id="wellbeing-enabled" type="checkbox" /><span></span></label></div>
                   <div class="wellbeing-settings"><label class="range-label">最短提醒间隔 <output id="wellbeing-interval-output">45 分钟</output><input id="wellbeing-interval" type="range" min="10" max="180" step="5" value="45" /></label><label class="range-label">连续使用多久后提醒 <output id="wellbeing-threshold-output">90 分钟</output><input id="wellbeing-threshold" type="range" min="30" max="240" step="5" value="90" /></label></div>
+                  <div class="wellbeing-actions"><button id="trigger-wellbeing" class="outline-button" type="button">立即弹出提醒</button><p id="wellbeing-status" class="status-text" aria-live="polite"></p></div>
                   <p class="field-help">电脑连续活跃时才会计时；离开电脑 15 分钟以上会重新开始计算。提醒不会加入聊天历史。</p>
                 </article>
               </section>
@@ -321,9 +323,10 @@
           </div>
 
           <div id="plan-view-weekly" class="plan-view" role="tabpanel" hidden>
-            <section class="plan-section-heading"><div><h2>每周重复</h2><p>按课表或工作表填写。按住鼠标左键滑过连续格子，一次设置多个时间段。</p></div><div class="weekly-settings"><label>设置几行<input id="weekly-row-count" type="number" min="1" max="40" step="1" value="13" /></label><label>持续时间（分钟）<input id="weekly-duration" type="number" min="5" max="240" step="5" value="45" /></label><button id="weekly-settings-save" class="outline-button" type="button">保存表格设置</button></div></section>
+            <section class="plan-section-heading"><div><h2>每周重复</h2><p>按课表或工作表填写。拖选多个格子可批量设置；单击已有计划可编辑事件或地点，按住并拖到另一处可像 Excel 一样移动整组计划。</p></div><div class="weekly-settings"><label>设置几行<input id="weekly-row-count" type="number" min="1" max="40" step="1" value="13" /></label><label>持续时间（分钟）<input id="weekly-duration" type="number" min="5" max="240" step="5" value="45" /></label><button id="weekly-settings-save" class="outline-button" type="button">保存表格设置</button></div></section>
             <div id="weekly-grid" class="weekly-grid" aria-label="每周计划表"></div>
-            <div class="weekly-editor"><span id="weekly-selection-count">尚未选择时间格</span><input id="weekly-plan-title" maxlength="200" placeholder="选中格子的计划名称" /><button id="weekly-save" class="primary-button" type="button">写入选中格</button><button id="weekly-clear" class="outline-button" type="button">清除选中格</button></div>
+            <div class="weekly-editor"><span id="weekly-selection-count">尚未选择时间格</span><input id="weekly-plan-event" maxlength="200" placeholder="事件（例如：项目评审）" /><input id="weekly-plan-location" maxlength="200" placeholder="地点（可选，例如：会议室 A）" /><button id="weekly-save" class="primary-button" type="button">写入选中格</button><button id="weekly-clear" class="outline-button" type="button">清除选中格</button></div>
+            <div class="weekly-reminders"><span>提醒时间（最多 3 次，按本地时间重复；留空则沿用开始前 15 分钟提醒）</span><label>提醒 1 <input id="weekly-reminder-1" type="time" /></label><label>提醒 2 <input id="weekly-reminder-2" type="time" /></label><label>提醒 3 <input id="weekly-reminder-3" type="time" /></label></div>
             <p id="weekly-status" class="status-text" aria-live="polite"></p>
           </div>
 

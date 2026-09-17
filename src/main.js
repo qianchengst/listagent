@@ -534,6 +534,47 @@ function sendWellbeingMessage(payload) {
   else send();
 }
 
+// Show a wellbeing message in the bubble without adding it to the persisted
+// conversation. This is shared by the automatic monitor and the control-panel
+// "立即提醒" action so both entry points behave identically.
+function showWellbeingBubble(text, sceneKey = 'manual') {
+  stopAutoMove();
+  const hadBubbleWindow = Boolean(bubbleWindow && !bubbleWindow.isDestroyed());
+  const bubbleWasVisible = hadBubbleWindow && bubbleWindow.isVisible();
+  if (!bubbleWindow || bubbleWindow.isDestroyed()) createBubbleWindow();
+  positionBubbleWindow();
+  if (typeof bubbleWindow.showInactive === 'function') bubbleWindow.showInactive();
+  else bubbleWindow.show();
+  // Do not refresh a currently open conversation: replacing its history while
+  // the user is typing would remove transient UI state. A newly created or
+  // hidden bubble still receives the normal history before the tip.
+  if (!bubbleWasVisible) sendChatHistory(bubbleWindow);
+  const payload = { text: String(text || '').trim(), scene: sceneKey, timestamp: new Date().toISOString() };
+  sendWellbeingMessage(payload);
+  return payload;
+}
+
+async function triggerWellbeingReminder() {
+  if (wellbeingBusy) throw new Error('正在生成上一条关怀提醒，请稍候。');
+  const settings = readSettings();
+  if (!hasTextModelConnection(settings)) {
+    throw new Error('请先在“连接”页面填写文本 API Base URL、文本模型名和文本 API Key。');
+  }
+  wellbeingBusy = true;
+  try {
+    const text = await generateWellbeingMessage(settings, {
+      key: 'manual',
+      title: '手动提醒',
+      context: '使用者在控制面板主动请求一句人文关怀提醒。请根据完整人格自然地关心使用者，可以提醒休息、喝水、活动眼睛和身体、按时吃饭或早点休息；不要查询时间或天气，也不要假定使用者已经连续使用了多久。'
+    });
+    // A manual reminder should also defer the next automatic reminder.
+    wellbeingLastTriggerAt = Date.now();
+    return showWellbeingBubble(text, 'manual');
+  } finally {
+    wellbeingBusy = false;
+  }
+}
+
 async function pollWellbeingReminder() {
   if (wellbeingBusy || taskDepth > 0 || (confirmationWindow && confirmationWindow.isVisible()) || (consoleWindow && consoleWindow.isVisible())) return;
   const settings = readSettings();
@@ -543,18 +584,7 @@ async function pollWellbeingReminder() {
   try {
     const text = await generateWellbeingMessage(settings, scene);
     wellbeingLastTriggerAt = Date.now();
-    stopAutoMove();
-    const hadBubbleWindow = Boolean(bubbleWindow && !bubbleWindow.isDestroyed());
-    const bubbleWasVisible = hadBubbleWindow && bubbleWindow.isVisible();
-    if (!bubbleWindow || bubbleWindow.isDestroyed()) createBubbleWindow();
-    positionBubbleWindow();
-    if (typeof bubbleWindow.showInactive === 'function') bubbleWindow.showInactive();
-    else bubbleWindow.show();
-    // Do not refresh a currently open conversation: replacing its history
-    // while the user is typing would remove transient UI state. A newly
-    // created/hidden bubble still receives the normal history before the tip.
-    if (!bubbleWasVisible) sendChatHistory(bubbleWindow);
-    sendWellbeingMessage({ text, scene: scene.key, timestamp: new Date().toISOString() });
+    showWellbeingBubble(text, scene.key);
   } catch (error) {
     // A transient provider/network failure should never interrupt the desktop
     // pet or produce a false “reminder sent” message. Suppress immediate
@@ -676,6 +706,19 @@ async function installAvailableUpdate() {
   app.isQuiting = true;
   setTimeout(() => app.quit(), 120);
   return { started: true, version: update.latestVersion, mode: updatePayload.kind, files: updatePayload.files, bytes: updatePayload.bytes };
+}
+
+function restartApplication() {
+  if (app.isRestarting) return { started: false };
+  app.isRestarting = true;
+  // Relaunch with the same development/packaged arguments, but never carry a
+  // one-shot Explorer delete request into the new instance.
+  const args = process.argv.slice(1);
+  const deleteIndex = args.indexOf(DELETE_ARG);
+  if (deleteIndex >= 0) args.splice(deleteIndex, 2);
+  app.relaunch({ args });
+  app.quit();
+  return { started: true };
 }
 
 function rendererPath(file) {
@@ -1533,6 +1576,7 @@ function registerIpc() {
   });
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => installAvailableUpdate());
+  ipcMain.handle('wellbeing:trigger', () => runTask(() => triggerWellbeingReminder()));
   ipcMain.handle('pet:choose-media', async (_event, state) => {
     const targetState = ['idle', 'standing', 'interaction', 'moving', 'rest', 'delete'].includes(state) ? state : 'idle';
     const title = targetState === 'moving'
@@ -1668,6 +1712,7 @@ function registerIpc() {
     app.isQuiting = true;
     app.quit();
   });
+  ipcMain.handle('app:restart', () => restartApplication());
 }
 
 app.whenReady().then(() => {

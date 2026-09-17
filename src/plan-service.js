@@ -113,7 +113,11 @@ function normalizeWeeklySlot(slot = {}) {
   const day = Math.max(0, Math.min(6, Math.round(Number(slot.day)) || 0));
   const start = normalizeTime(slot.start);
   const end = normalizeTime(slot.end);
-  const title = String(slot.title || '').trim().slice(0, 200);
+  // `title` is kept as a compatibility alias for plans created before the
+  // event/location split. New entries expose both fields independently.
+  const event = String(slot.event ?? slot.title ?? '').trim().slice(0, 200);
+  const location = String(slot.location || '').trim().slice(0, 200);
+  const title = event || location;
   if (!start || !end || !title) return null;
   return {
     id: String(slot.id || `${day}-${start}`),
@@ -121,6 +125,9 @@ function normalizeWeeklySlot(slot = {}) {
     start,
     end,
     title,
+    event,
+    location,
+    reminderTimes: normalizeReminderTimes(slot.reminderTimes, 3),
     updatedAt: String(slot.updatedAt || new Date().toISOString())
   };
 }
@@ -141,9 +148,10 @@ function normalizeEvent(event = {}) {
   };
 }
 
-function normalizeReminderTimes(values) {
+function normalizeReminderTimes(values, limit = Number.POSITIVE_INFINITY) {
   const list = Array.isArray(values) ? values : [];
-  return [...new Set(list.map(normalizeTime).filter(Boolean))].sort();
+  const max = Number.isFinite(Number(limit)) ? Math.max(0, Math.round(Number(limit))) : Number.POSITIVE_INFINITY;
+  return [...new Set(list.map(normalizeTime).filter(Boolean))].sort().slice(0, max);
 }
 
 function normalizeStore(saved = {}) {
@@ -249,7 +257,7 @@ function prepareStore(store, now = new Date()) {
   // Keep reminder state bounded to recent date keys and existing events.
   const cutoff = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   for (const key of Object.keys(store.reminderState)) {
-    const match = /^(?:todo:)?(\d{4}-\d{2}-\d{2})/.exec(key);
+    const match = /^(?:(?:today|todo|weekly):)?(\d{4}-\d{2}-\d{2})/.exec(key);
     if (match) {
       const date = dateFromKey(match[1]);
       if (date && date < cutoff) { delete store.reminderState[key]; changed = true; }
@@ -395,6 +403,63 @@ function pendingTodoTitles(store) {
   return store.today.items.filter((item) => item.allDay && !item.done).map((item) => item.title);
 }
 
+function isReminderTimeDue(now, time) {
+  const normalized = normalizeTime(time);
+  if (!normalized) return false;
+  const [hour, minute] = normalized.split(':').map(Number);
+  const current = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  const target = hour * 60 + minute;
+  // The plan monitor runs every 30 seconds. A two-minute window prevents a
+  // short scheduling delay from skipping a manually entered reminder.
+  return current >= target && current < target + 2;
+}
+
+function weeklySlotEventKey(slot) {
+  return String(slot?.event || slot?.title || '').trim().toLocaleLowerCase();
+}
+
+function weeklySlotRowIndex(slot, rowTimes) {
+  const normalizedStart = normalizeTime(slot?.start);
+  const row = rowTimes.indexOf(normalizedStart);
+  if (row >= 0) return row;
+  // Older data may not have a matching row header.  A minute value still gives
+  // us a useful ordering and lets contiguous slots be merged when their end
+  // time is the next slot's start time.
+  if (!normalizedStart) return Number.POSITIVE_INFINITY;
+  const [hour, minute] = normalizedStart.split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+function buildWeeklyReminderGroups(slots, rowTimes = []) {
+  const normalizedRows = Array.isArray(rowTimes) ? rowTimes.map(normalizeTime) : [];
+  const ordered = (Array.isArray(slots) ? slots : [])
+    .map((slot, index) => ({ slot, index, row: weeklySlotRowIndex(slot, normalizedRows) }))
+    .sort((left, right) => left.row - right.row || String(left.slot.start).localeCompare(String(right.slot.start)) || left.index - right.index);
+  const groups = [];
+  for (const entry of ordered) {
+    const previous = groups[groups.length - 1];
+    const eventKey = weeklySlotEventKey(entry.slot);
+    const rowsAdjacent = previous && Number.isFinite(previous.lastRow) && Number.isFinite(entry.row)
+      ? entry.row === previous.lastRow + 1
+      : previous && normalizeTime(previous.item.end) && normalizeTime(previous.item.end) === normalizeTime(entry.slot.start);
+    if (previous && previous.eventKey === eventKey && rowsAdjacent) {
+      previous.lastRow = entry.row;
+      previous.item.end = entry.slot.end || previous.item.end;
+      if (!previous.item.location && entry.slot.location) previous.item.location = entry.slot.location;
+      previous.reminderTimes = normalizeReminderTimes([...previous.reminderTimes, ...normalizeReminderTimes(entry.slot.reminderTimes, 3)], 3);
+      continue;
+    }
+    groups.push({
+      id: String(entry.slot.id || `${entry.slot.day}-${entry.slot.start}`),
+      eventKey,
+      item: { ...entry.slot },
+      lastRow: entry.row,
+      reminderTimes: normalizeReminderTimes(entry.slot.reminderTimes, 3)
+    });
+  }
+  return groups;
+}
+
 function consumeDueReminders(now = new Date()) {
   const store = readPlans(now);
   const reminders = [];
@@ -416,9 +481,24 @@ function consumeDueReminders(now = new Date()) {
     if (withinWindow(start)) add(`today:${effectiveKey}:${item.id}`, { type: 'today', item, startsAt: start.toISOString() });
   }
   const weekDay = now.getDay();
-  for (const slot of store.weekly.slots.filter((item) => item.day === weekDay)) {
+  const weeklySlots = store.weekly.slots.filter((item) => item.day === weekDay);
+  for (const group of buildWeeklyReminderGroups(weeklySlots, store.weekly.rowTimes)) {
+    const slot = group.item;
     const start = parseLocalDateTime(dateKey, slot.start);
-    if (withinWindow(start)) add(`weekly:${dateKey}:${slot.id}`, { type: 'weekly', item: slot, startsAt: start.toISOString() });
+    const reminderTimes = group.reminderTimes;
+    if (reminderTimes.length) {
+      for (const reminderTime of reminderTimes) {
+        if (isReminderTimeDue(now, reminderTime)) {
+          add(`weekly:${dateKey}:${group.id}:${reminderTime}`, {
+            type: 'weekly', item: slot, startsAt: start?.toISOString?.() || '', reminderTime
+          });
+        }
+      }
+    } else if (withinWindow(start)) {
+      // Preserve the original behaviour for legacy slots with no explicit
+      // reminders: one notification in the 15-minute pre-start window.
+      add(`weekly:${dateKey}:${group.id}:before-start`, { type: 'weekly', item: slot, startsAt: start.toISOString() });
+    }
   }
   for (const event of store.events) {
     if (event.done) continue;

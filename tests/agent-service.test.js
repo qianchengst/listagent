@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { chatWithWechatImage, generateGreeting, generateWellbeingMessage, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, inferDesktopScreenIntent, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
+const { chatWithWechatImage, generateGreeting, generateWellbeingMessage, generatePlanReminder, inferOpenApplicationIntent, inferOpenDocumentIntent, isOpenApplicationRequest, inferDocumentToolCall, inferCompoundWeatherNoteTask, inferRealityToolCall, inferDesktopScreenIntent, canAutoExecuteToolCalls, formatReadOnlyToolResult, formatApplicationResult, generateApplicationReply } = require('../src/agent-service');
 const { TOOL_DEFINITIONS } = require('../src/automation-service');
 
 function settings() {
@@ -96,6 +96,48 @@ test('wellbeing reminder uses the complete persona without tools or chat history
     assert.match(request.messages[0].content, /FULL_WELLBEING_PERSONA/);
     assert.match(request.messages[0].content, /FULL_WELLBEING_EXAMPLE/);
     assert.match(request.messages[1].content, /连续使用电脑很久/);
+    assert.equal(request.tools, undefined);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('wellbeing reminder never exposes provider tool-call markup', async () => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async (_url, options) => {
+    calls += 1;
+    const request = JSON.parse(options.body);
+    assert.equal(request.tools, undefined);
+    const content = calls === 1
+      ? '<tool_calls>\\n<invoke name="get_current_time">\\n</invoke>\\n</tool_calls>'
+      : '博士，先伸个懒腰，喝口水再继续吧。';
+    return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
+  };
+  try {
+    const message = await generateWellbeingMessage(settings(), { context: '手动提醒' });
+    assert.equal(calls, 2);
+    assert.match(message, /伸个懒腰/);
+    assert.doesNotMatch(message, /tool_calls|invoke|get_current_time/iu);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('weekly course reminders receive varied, companion-like wording guidance', async () => {
+  const originalFetch = global.fetch;
+  let request;
+  global.fetch = async (_url, options) => {
+    request = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: '博士，下一节高等数学快开始了，地点在 A203。' } }] }) };
+  };
+  try {
+    const message = await generatePlanReminder(settings(), {
+      type: 'weekly',
+      item: { day: 1, event: '高等数学', start: '09:00', end: '09:45', location: 'A203' },
+      startsAt: new Date(Date.now() + 15 * 60000).toISOString(),
+      reminderTime: '08:45'
+    });
+    assert.match(message, /高等数学/);
+    assert.match(request.messages[1].content, /每周重复的课程安排/);
+    assert.match(request.messages[1].content, /课程提醒不能每次都使用同一种开头或句式/);
+    assert.match(request.messages[1].content, /A203/);
     assert.equal(request.tools, undefined);
   } finally { global.fetch = originalFetch; }
 });
